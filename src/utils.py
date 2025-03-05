@@ -12,7 +12,7 @@ def Euler_Maruyama_sampler(
     conditioner=None,
     device='cuda', 
 ):
-    """Generate samples from score-based models with the Euler-Maruyama solver.
+    """Generate samples from diffusion models with the Euler-Maruyama solver.
 
     Args:
     scoremodel: A PyTorch model that represents the time-dependent score-based model.
@@ -38,7 +38,7 @@ def Euler_Maruyama_sampler(
             batch_time_step = torch.ones(batch_size, device=device) * time_step
             g = diffusion_coeff(batch_time_step)
             mean_x = x + (g**2)[:, None] * scoremodel(x, batch_time_step) * step_size
-            if conditioner != None:
+            if conditioner is not None:
                 mean_x += (g**2)[:, None] * conditioner(x) * step_size
             x = mean_x + torch.sqrt(step_size) * g[:, None] * torch.randn_like(x)      
     return mean_x
@@ -47,15 +47,19 @@ def Langevin_sampler(
     input, 
     scoremodel=None,
     conditioner=None, 
-    n_steps=1000, 
+    num_steps=1000, 
     eps=1e-3, 
-):
+    device='cpu',
+): 
     sqrtfac = np.sqrt(2.*eps)
-    output = input
-    for step in range(n_steps):
-        tmp = scoremodel(output) 
+    output = input.clone()
+    for _ in range(num_steps):
+        tmp = torch.zeros_like(output)
+        if scoremodel is not None:
+            tmp += scoremodel(output) 
         if conditioner is not None:
             tmp += conditioner(output)
-        output += eps * tmp + sqrtfac * torch.randn(size=output.shape)
+        noise = torch.randn_like(output)
+        output += eps * tmp + sqrtfac * noise
         
     return output

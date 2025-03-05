@@ -10,4 +10,5 @@ dependencies = [
     "pyqt6>=6.8.0",
     "scipy>=1.14.1",
     "torch>=2.5.1",
+    "torchtyping>=0.1.5",
 ]
