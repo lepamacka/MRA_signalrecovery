@@ -14,7 +14,7 @@ from utils import Euler_Maruyama_sampler
 
 # Takes a (diffusion) score model and plots projected scores on a plane.
 # The plane passes through plane_mag*[ones] and is normal to [ones].
-# This doesn't actually project the whole score, just the first 3 components.
+# This projects the first 3 components.
 @torch.no_grad()
 def score_projector(
     t_diff, 

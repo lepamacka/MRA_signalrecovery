@@ -7,6 +7,7 @@ from torchtyping import TensorType
 from circulant import circulant
 from pwrspec_score import pwrspec_score
 from utils import Langevin_sampler
+from scorematching.models.scoremodels import ConvScoreModel
 
 # A simple score model, standard gaussian centered at 0.
 class GaussianScoreModel(torch.nn.Module):
@@ -57,17 +58,20 @@ if __name__ == "__main__":
 
     # Set scoremodel parameters
 
-    # mean = torch.tensor([0., 0., 0.], device=device)
-    # A = torch.tensor([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], device=device)
+    # # mean = torch.tensor([0., 0., 0.], device=device)
+    # # A = torch.tensor([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], device=device)
+    # mean = torch.tensor([2., 0., 0.], device=device)
+    # A = 0.5 * torch.tensor([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], device=device)
+    # # mean = torch.tensor([6., 0., 0.], device=device)
+    # # A = torch.tensor([[3., 0., 0.], [0., 0.5, 0.], [0., 0., 0.5]], device=device)
+    # covar_mat = torch.einsum('ij, kj -> ik', A, A)
+    # scoremodel = GaussianScoreModel(mean, covar_mat).to(device)
 
-    mean = torch.tensor([2., 0., 0.], device=device)
-    A = 0.5 * torch.tensor([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], device=device)
-
-    # mean = torch.tensor([6., 0., 0.], device=device)
-    # A = torch.tensor([[3., 0., 0.], [0., 0.5, 0.], [0., 0., 0.5]], device=device)
-
-    covar_mat = torch.einsum('ij, kj -> ik', A, A)
-    scoremodel = GaussianScoreModel(mean, covar_mat).to(device)
+    channels = 3
+    hiddendim = 32
+    PATH = f"scorematching/model_weights/MRA_convscoremodel_length{channels}_hiddim{hiddendim}/"
+    scoremodel = ConvScoreModel(length=channels, hiddendim=hiddendim).to(device)
+    scoremodel.load_state_dict(torch.load(PATH+"weights_dict.pth", weights_only=True))
     scoremodel.eval()
     # scoremodel = None
 
@@ -81,8 +85,8 @@ if __name__ == "__main__":
         size=(num_samples, signal_true.shape[-1]), 
         device=device,
     )
-    input = torch.einsum('ij, ...j -> ...i', A, input)
-    input += mean
+    # input = torch.einsum('ij, ...j -> ...i', A, input)
+    # input += mean
     
     output = Langevin_sampler(
         input=input,

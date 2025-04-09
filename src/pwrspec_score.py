@@ -93,7 +93,6 @@ def pwrspec_CLT_score_comps(
     q_mat_k = torch.einsum("i, j -> ij", torch.conj(fft_mat_k), fft_mat_k) 
     sym_mat_k = (q_mat_k + torch.conj(q_mat_k).T).real
 
-    # res = (z[k] - M * (1. + x_Psqr_k)) * (z[k] + M * x_Psqr_k) / (2. * M * (1. + 2. * x_Psqr_k)**2)
     res = (z[k] - M * (1. + x_Psqr_k)) * (z[k]/M + x_Psqr_k) / (2. * (1. + 2. * x_Psqr_k)**2)
     res /= k_fac
     out = res.unsqueeze(-1) * torch.einsum('ij, ...j -> ...i', sym_mat_k, x_new)
