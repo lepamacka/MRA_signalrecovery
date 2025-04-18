@@ -12,7 +12,7 @@ from utils import Langevin_sampler
 class GaussianScoreModel(torch.nn.Module):
     def __init__(
         self, 
-        mean: TensorType["L"],
+        mean: TensorType["L"], 
         covar_mat: TensorType["L", "L"], 
     ):
         super().__init__()
@@ -40,19 +40,21 @@ if __name__ == "__main__":
     print(f"Current device is \'{device}\'.")
     
     # Set parameters for conditional sampling wrt power spectrum.
-    M = 500
+    M = 1000
+    sigma = 1.
     signal_true = torch.tensor([4., 0., 0.], device=device)
 
     circulant_true = circulant(signal_true, dim=0)
-    pwrspec_true = torch.abs(fft(signal_true, norm='ortho')).square()
-    sample_pwrspec = M * pwrspec_true
+    pwrspec_true = torch.abs(fft(signal_true, norm='ortho')).square()*(sigma**2)
+    # sample_pwrspec = M * pwrspec_true
     print(pwrspec_true)
     conditioner = functools.partial(
         pwrspec_score,
-        z=sample_pwrspec,
+        rho=pwrspec_true,
         M=M,
+        sigma=sigma,
         device=device,
-        CLT=False,
+        CLT=True,
     )
 
     # Set scoremodel parameters
@@ -92,6 +94,9 @@ if __name__ == "__main__":
         eps=eps,
         device=device,
     )
+
+    if torch.any(torch.isfinite(output.reshape((-1))).logical_not()):
+        print("Some of the output is nan or inf.")
 
     # print(output.mean().item())
 

@@ -41,7 +41,6 @@ class ConvScoreModel(nn.Module):
         h = self.conv2(h, self.ht2)
         h = self.act(h)
         h = self.conv3(h, self.ht3)
-        h = self.act(h)
         
         out = h.squeeze(1)
         return out
@@ -51,10 +50,10 @@ class BatchConvolver1D(nn.Module):
     differentiable linear transform of a second input vector [B, kernel_indim].
     Output is [B, out_dim, length]."""
     def __init__(
-        self, 
-        length, 
-        in_dim, 
-        out_dim, 
+        self,
+        length,
+        in_dim,
+        out_dim,
         kernel_indim,
     ):
         super().__init__()
@@ -67,7 +66,8 @@ class BatchConvolver1D(nn.Module):
         
     def forward(self, h, ht):
         kernels = self.kerneldense(ht).view(-1, self.out_dim, self.in_dim, self.length)
-        h_pad = self.circpad(h).unsqueeze(1)
-        output = torch.vmap(nn.functional.conv1d)(h_pad, kernels).squeeze(1)
+        kernels = kernels.expand(h.shape[0], -1, -1, -1)
+        h_pad = self.circpad(h)
+        output = torch.vmap(nn.functional.conv1d)(h_pad, kernels)
         return output
     

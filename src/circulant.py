@@ -1,6 +1,6 @@
 import torch
 
-# Helper function, makes circulants.
+# Helper function, makes circulant matrix of input signal.
 def circulant(tensor, dim):
     """get a circulant version of the tensor along the {dim} dimension.
     The additional axis is appended as the last dimension.

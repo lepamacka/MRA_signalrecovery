@@ -10,82 +10,96 @@ def seed_worker(worker_id):
 
 # Iterator for batches. Generates sample vectors for multireference alignment.
 class ReferenceVectorIterator:
-    def __init__(self, 
-                 signal_sampler, 
-                 channels, 
-                 sigma, 
-                 epochsize, 
-                 generator=None,
-                 device='cpu'):
-        self.signals = signal_sampler(size=(epochsize, 1),
-                                      generator=generator,
-                                      device=device)
-        self.shifts = torch.randint(low=0, 
-                                    high=channels, 
-                                    size=(epochsize, 1), 
-                                    generator=generator, 
-                                    device=device)
-        self.randvecs = sigma * torch.randn(size=(epochsize, 1, channels), 
-                                            generator=generator, 
-                                            device=device)
+    def __init__(
+        self, 
+        signal_sampler, 
+        length, 
+        sigma, 
+        epochsize, 
+        generator=None,
+        device='cpu'
+    ):
+        self.signals = signal_sampler(
+            size=(epochsize,),
+            generator=generator,
+            device=device
+        )
+        self.shifts = torch.randint(
+            low=0, 
+            high=length, 
+            size=(epochsize,), 
+            generator=generator, 
+            device=device
+        )
+        self.randvecs = sigma * torch.randn(
+            size=(epochsize, length), 
+            generator=generator, 
+            device=device
+        )
         self.epochsize = epochsize
         self.idx = 0
 
     def __next__(self):
         if self.idx >= self.epochsize:
             raise StopIteration()
-        item = torch.roll(input=self.signals[self.idx, :, :], 
-                          shifts=self.shifts[self.idx].item(), 
-                          dims=1) 
-        item += self.randvecs[self.idx, :, :]
+        item = torch.roll(
+            input=self.signals[self.idx, :], 
+            shifts=self.shifts[self.idx].item(), 
+            dims=-1
+        ) 
+        item += self.randvecs[self.idx, :]
         self.idx += 1
         return item
 
 # Streams random samples for multireference alignment problem with isotropic gaussian noise.
 # Set generator seed to enable reproducibility (doesn't seem to work?).
 class ReferenceVectorSampler(torch.utils.data.IterableDataset):
-    def __init__(self, 
-                 signal_sampler, 
-                 channels, 
-                 sigma, 
-                 epochsize, 
-                 generator=None,
-                 device='cpu'):
+    def __init__(
+        self, 
+        signal_sampler, 
+        length, 
+        sigma, 
+        epochsize, 
+        generator=None,
+        device='cpu'
+    ):
         super().__init__()
         assert isinstance(signal_sampler, samplers.SignalSampler)
-        assert len(signal_sampler()) == channels
+        assert len(signal_sampler) == length
         self.signal_sampler = signal_sampler
-        self.channels = channels
+        self.length = length
         self.sigma = sigma
         self.epochsize = epochsize
         self.generator = generator
         self.device = device
 
     def __iter__(self):
-        return ReferenceVectorIterator(signal_sampler=self.signal_sampler, 
-                                       channels=self.channels, 
-                                       sigma=self.sigma, 
-                                       epochsize=self.epochsize, 
-                                       generator=self.generator, 
-                                       device=self.device)
+        return ReferenceVectorIterator(
+            signal_sampler=self.signal_sampler, 
+            length=self.length, 
+            sigma=self.sigma, 
+            epochsize=self.epochsize, 
+            generator=self.generator, 
+            device=self.device
+        )
 
 # Iterator for batches. Generates transformed sample vectors for multireference alignment.
 # CURRENTLY NOT FUNCTIONAL.
 class ReferenceFourierIterator:
     def __init__(self, 
                  signal_fft, 
-                 channels, 
+                 length, 
                  sigma, 
                  epochsize, 
                  generator=None,
                  device='cpu'):
         shifts = torch.randint(low=0, 
-                               high=channels, 
+                               high=length, 
                                size=(epochsize), 
                                generator=generator, 
                                device=device)
         shifts_fft = torch.vmap(torch.exp)(2.*math.pi*shifts) #WIP
-        self.outputs = signal_fft + sigma * torch.randn((epochsize, 1, channels), 
+        self.outputs = signal_fft + sigma * torch.randn((epochsize, 1, length), 
                                                         generator=generator, 
                                                         device=device)
         self.epochsize = epochsize
@@ -104,14 +118,14 @@ class ReferenceFourierIterator:
 class ReferenceFourierSampler(torch.utils.data.IterableDataset):
     def __init__(self, 
                  signal_fft, 
-                 channels, 
+                 length, 
                  sigma, 
                  epochsize, 
                  generator=None,
                  device='cpu'):
         super().__init__()
         self.signal_fft = signal_fft.to(device)
-        self.channels = channels
+        self.length = length
         self.sigma = sigma
         self.epochsize = epochsize
         self.generator = generator
@@ -119,7 +133,7 @@ class ReferenceFourierSampler(torch.utils.data.IterableDataset):
 
     def __iter__(self):
         return ReferenceFourierIterator(signal_fft=self.signal_fft, 
-                                        channels=self.channels, 
+                                        length=self.length, 
                                         sigma=self.sigma, 
                                         epochsize=self.epochsize, 
                                         generator=self.generator, 

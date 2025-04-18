@@ -23,54 +23,67 @@ if __name__ == '__main__':
     # generator.manual_seed(1337)
     # generator_cpu.manual_seed(1337)
 
-    channels = 3
-    hiddendim = 32
+    length = 3
+    hiddendim = 8
     
-    model = ConvScoreModel(length=channels, hiddendim=hiddendim).to(device)
-    model_name = f"MRA_convscoremodel_length{channels}_hiddim{hiddendim}"
+    model = ConvScoreModel(length=length, hiddendim=hiddendim).to(device)
+    model_name = f"MRA_convscoremodel_length{length}_hiddim{hiddendim}"
     model.train()
     
-    batchsize = 2**6
+    batchsize = 2**8
     batchnum = 2**6
     n_epochs = 100
     digs = int(math.log10(n_epochs))+1
     epochsize = batchsize * batchnum
 
-    signal = torch.zeros((channels))
-    # signal[0, :channels//2] = torch.sin(2. * math.pi * torch.arange(0, channels//2)/channels)
-    signal[0] = 1
-    # signal = torch.randn((1,channels), generator=generator)
-    signal_sigma = 0.2
-    signal_sampler = samplers.GaussianSignal(channels=channels, 
-                                            mu=signal, 
-                                            sigma=signal_sigma)
+    signal = torch.zeros((length))
+    # signal[0, :length//2] = torch.sin(2. * math.pi * torch.arange(0, length//2)/length)
+    signal[0] = 2
+    # signal = torch.randn((1,length), generator=generator)
+    # signal_sigma = 0.2
+    # signal_sampler = samplers.GaussianSignal(
+    #     length=length, 
+    #     mu=signal, 
+    #     sigma=signal_sigma
+    # )
+    signal_sampler = samplers.DegenerateLoop(
+        length=length, 
+        signal=signal, 
+        scale=1.,
+    )
     
-    SNR = 9
-    # sigma = torch.linalg.vector_norm(signal)/((channels**0.5)*(SNR**0.5))
-    sigma = torch.tensor([0.2])
+    # SNR = 9
+    # sigma = torch.linalg.vector_norm(signal)/((length**0.5)*(SNR**0.5))
+    sigma = torch.tensor([0.1])
     print(f"Scale of noise is: {sigma.item():.3f}")
 
-    dataset = ReferenceVectorSampler(signal_sampler=signal_sampler, 
-                                     channels=channels, 
-                                     sigma=sigma, 
-                                     epochsize=epochsize, 
-                                     generator=generator_cpu,
-                                     device='cpu')
+    dataset = ReferenceVectorSampler(
+        signal_sampler=signal_sampler, 
+        length=length, 
+        sigma=sigma, 
+        epochsize=epochsize, 
+        generator=generator_cpu,
+        device='cpu'
+    )
     
     # Have not found a way to ensure reproducibility with seed, probably due to dataloader peculiarities. 
-    dataloader = torch.utils.data.DataLoader(dataset=dataset, 
-                                             batch_size=batchsize, 
-                                             worker_init_fn=seed_worker, 
-                                             generator=generator_cpu)
+    dataloader = torch.utils.data.DataLoader(
+        dataset=dataset, 
+        batch_size=batchsize, 
+        worker_init_fn=seed_worker, 
+        generator=generator_cpu
+    )
     
     print(f"Model parameters: {sum(p.numel() for p in model.parameters())}")
     print(f"Training samples: {epochsize*n_epochs}")
 
     optimizer = optim.Adam(model.parameters(), lr=0.001)
-    scheduler = LinearLR(optimizer, 
-                         start_factor=0.2, 
-                         end_factor=1, 
-                         total_iters=n_epochs//2)
+    scheduler = LinearLR(
+        optimizer, 
+        start_factor=0.2, 
+        end_factor=1, 
+        total_iters=n_epochs//2
+    )
     
     t_0 = perf_counter()
     for epoch in range(n_epochs):
