@@ -47,20 +47,20 @@ if __name__ == "__main__":
     print(f"Current device is \'{device}\'.")
 
     ### Set parameters for MRA
-    M = 100
-    sigma = 1.
+    M = 100000
+    sigma = 10.
 
     ### Set parameters for true signal
-    length = 41
+    length = 3
     signal_true = torch.zeros((length,), device=device, requires_grad=False)
-    signal_true[0] = length
+    signal_true[0] = np.sqrt(length)
 
     # signal_true = 1. * torch.ones((length,), device=device, requires_grad=False)
     # signal_true += 0.5 * torch.randn_like(signal_true)
 
     ### Set parameters for conditioner
-    use_random_pwrspec = True
-    use_CLT = False # FIX CLT FIRST
+    use_random_pwrspec = False
+    use_CLT = True # FIX CLT FIRST
     use_none_cond = False
 
     ### Set parameters for score model
@@ -104,7 +104,7 @@ if __name__ == "__main__":
     if use_random_pwrspec:
         sample_pwrspec = torch.abs(fft(samples, norm='ortho')).square().mean(dim=0)
     else:
-        sample_pwrspec = (pwrspec_true + 1) * (sigma ** 2)
+        sample_pwrspec = pwrspec_true + sigma ** 2
     
     if use_none_cond:
         conditioner = None

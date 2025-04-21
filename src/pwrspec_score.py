@@ -39,30 +39,35 @@ def pwrspec_score_comps(
         sigma: float,
         device='cpu',
 ) -> TensorType[..., "L"]:
-
+    # Set index factor
     if k == 0 or (k == x_new.shape[-1]//2 and x_new.shape[-1]%2 == 0):
         k_fac = 1
     else:
         k_fac = 2
 
+    # Define relevant variables
     x_Psqr_k = torch.abs(x_tilde[..., k]).square()
     xi_k = k_fac * M * torch.sqrt(rho[k] * x_Psqr_k) / (sigma ** 2)
     xi_k_cpu = xi_k.to('cpu').detach().numpy()
 
+    # Calculate matrix factor for gradient of power spectrum component
     fft_mat_k = fft(torch.eye(x_new.shape[-1], device=device)[:, k], norm='ortho')
     q_mat_k = torch.einsum("i, j -> ij", torch.conj(fft_mat_k), fft_mat_k) 
     sym_mat_k = (q_mat_k + q_mat_k.T).real
 
+    # Calculate unapproximated values of Bessel terms
     div = ive(k_fac*M/2-1, xi_k_cpu)
     div_res = (ive(k_fac*M/2, xi_k_cpu[div!=0.]) + ive(k_fac*M/2-2, xi_k_cpu[div!=0.])) / (k_fac * 2. * div[div!=0.])
     res_cpu = np.inf * np.ones_like(div)
     res_cpu[div!=0.] = div_res * xi_k_cpu[div!=0.]
     res_cpu = torch.tensor(res_cpu, device=device)
 
+    # Calculate approximated values of Bessel terms and replace where necessary
     res = ((k_fac * M / 2.) - 1) * (xi_k**2) / (k_fac * 4.)
     idxs = torch.all(torch.stack((xi_k / M >= 1., torch.isfinite(res_cpu))), dim=0)
     res[idxs] = res_cpu[idxs]
 
+    # Calculate additional terms and factors and return score
     res -= M * x_Psqr_k / (sigma ** 2)
     res -= M / 2.
     res += 1. / k_fac
@@ -90,11 +95,15 @@ def pwrspec_CLT_score_comps(
     q_mat_k = torch.einsum("i, j -> ij", torch.conj(fft_mat_k), fft_mat_k) 
     sym_mat_k = (q_mat_k + torch.conj(q_mat_k).T).real
 
-    res = M * (rho[k] / (sigma ** 2) - (1. + x_Psqr_k / (sigma ** 2))) * (rho[k] / (sigma ** 2) + x_Psqr_k / (sigma ** 2)) / (2. * (1. + 2. * x_Psqr_k / (sigma ** 2))**2)
+    # res = M * (rho[k] / (sigma ** 2) - (1. + x_Psqr_k / (sigma ** 2))) * (rho[k] / (sigma ** 2) + x_Psqr_k / (sigma ** 2)) / (2. * (1. + 2. * x_Psqr_k / (sigma ** 2))**2)
+    res = -1. * M * (x_Psqr_k * (sigma**2 + x_Psqr_k) + rho[k] * (sigma**2 - rho[k])) / (sigma**2 * (sigma**2 + 2. * x_Psqr_k)**2)
     res /= k_fac
+    res += -1. / (2 * x_Psqr_k + sigma**2)
     out = res.unsqueeze(-1) * torch.einsum('ij, ...j -> ...i', sym_mat_k, x_new)
 
     return out
+
+## Legacy version with unscaled power spectrum and no sigma parameter.
 
 # def pwrspec_score_comps_legacy(
 #         x_new: TensorType[..., "L"], 
