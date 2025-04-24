@@ -47,24 +47,25 @@ if __name__ == "__main__":
     print(f"Current device is \'{device}\'.")
 
     ### Set parameters for MRA
-    M = 100000
-    sigma = 10.
+    M = 100
+    sigma = 1.
 
     ### Set parameters for true signal
     length = 3
     signal_true = torch.zeros((length,), device=device, requires_grad=False)
-    signal_true[0] = np.sqrt(length)
+    # signal_true[0] = np.sqrt(length)
+    signal_true[0] = 2.
 
     # signal_true = 1. * torch.ones((length,), device=device, requires_grad=False)
     # signal_true += 0.5 * torch.randn_like(signal_true)
 
     ### Set parameters for conditioner
     use_random_pwrspec = False
-    use_CLT = True # FIX CLT FIRST
-    use_none_cond = False
+    use_CLT = False
+    use_none_cond = True
 
     ### Set parameters for score model
-    scoremodel_type = "none" # "gaussian", "learned", "none"
+    scoremodel_type = "gaussian" # "gaussian", "learned", "none"
     
     ### Set parameters for gaussian score model
     mean = torch.zeros_like(signal_true)
@@ -82,11 +83,13 @@ if __name__ == "__main__":
 
     ### Set parameters for Langevin sampling
     num_steps = 1000
-    num_samples = 2 ** 8
+    num_samples = 2 ** 9
     eps = 1e-3
 
     ### Set parameters for plotting
-    plot_output_only = False
+    plot_output_only = True
+    plot_input = False
+    plot_MRA_samples = True
 
 
     ## Conditioner
@@ -128,7 +131,8 @@ if __name__ == "__main__":
             PATH = f"scorematching/model_weights/MRA_convscoremodel_length{length}_hiddim{hiddendim}/"
             PATH = os.path.join(PATH, "weights_dict.pth")
         scoremodel = ConvScoreModel(length=length, hiddendim=hiddendim).to(device)
-        scoremodel.load_state_dict(torch.load(PATH+"weights_dict.pth", weights_only=True))
+        state_dict = torch.load(PATH, weights_only=True, map_location=device)
+        scoremodel.load_state_dict(state_dict)
         scoremodel.eval()
     elif scoremodel_type == "none":
         scoremodel = None
@@ -174,12 +178,50 @@ if __name__ == "__main__":
 
 
     ## Plot results
+    samples = samples.detach().to('cpu')
     input = input.detach().to('cpu')
     output = output.detach().to('cpu')
     signal_true = signal_true.detach().to('cpu')
     circulant_true = circulant_true.detach().to('cpu')
 
-    if signal_true.shape[0] >= 3:
+    if plot_MRA_samples and signal_true.shape[0] >= 3:
+        fig = plt.figure()
+        ax = fig.add_subplot(projection='3d')
+        ax.scatter(
+            [0.],
+            [0.],
+            [0.],
+            c='black',
+            marker = 'x',
+        )
+        ax.scatter(
+            circulant_true[0:3, 0], 
+            circulant_true[0:3, 1], 
+            circulant_true[0:3, 2], 
+            c='red',
+            marker='*',
+            linewidth=4.,
+        )
+        ax.scatter(
+            samples[:, 0], 
+            samples[:, 1], 
+            samples[:, 2], 
+            c='cornflowerblue',
+            marker='.',
+        )
+        ax.legend(["Origin", "True Signal", "MRA Samples"])  
+        ax.set_aspect('equal')
+        ax.set_xlabel("x")
+        ax.set_ylabel("y")
+        ax.set_zlabel("z")
+
+        ax.view_init(elev=35, azim=-45, roll=0)
+
+        plt.savefig("./../figs/moment_likelihood/MRA_samples.svg")
+        plt.savefig("./../figs/moment_likelihood/MRA_samples.png")
+
+        plt.show()
+    elif signal_true.shape[0] >= 3:
         fig = plt.figure()
         ax = fig.add_subplot(projection='3d')
         ax.scatter(
@@ -196,14 +238,19 @@ if __name__ == "__main__":
             c='forestgreen',
             marker='.',
         )
+        if use_none_cond:
+            output_samples_tag = "Prior Samples"
+        else:
+            output_samples_tag = "Posterior Samples"
         if not plot_output_only:
-            ax.scatter(
-                input[:, 0], 
-                input[:, 1], 
-                input[:, 2], 
-                c='cornflowerblue',
-                marker='.',
-            )
+            if plot_input:
+                ax.scatter(
+                    input[:, 0], 
+                    input[:, 1], 
+                    input[:, 2], 
+                    c='cornflowerblue',
+                    marker='.',
+                )
             if signal_true.shape[0] == 3:
                 ax.scatter(
                     circulant_true[0:3, 0], 
@@ -211,7 +258,7 @@ if __name__ == "__main__":
                     circulant_true[0:3, 2], 
                     c='red',
                     marker='*',
-                    linewidth=2.,
+                    linewidth=4.,
                 )
                 theta = np.linspace(0, 2 * np.pi, 100)
                 radius = torch.norm(signal_true - signal_true.mean()).item()
@@ -234,13 +281,19 @@ if __name__ == "__main__":
                 xyz = rotmat @ xyz
                 xyz1 = xyz + signal_true[0:3].mean().item()
                 xyz2 = xyz - signal_true[0:3].mean().item()
-                ax.plot(xyz1[0, ...], xyz1[1, ...], xyz1[2, ...], c='red', linestyle='dotted', linewidth=0.5)
-                ax.plot(xyz2[0, ...], xyz2[1, ...], xyz2[2, ...], c='red', linestyle='dotted', linewidth=0.5)
-                ax.legend(["Origin", "Conditioned Samples", "Gaussian Samples", "True Signal", "Phase Manifold"])
+                ax.plot(xyz1[0, ...], xyz1[1, ...], xyz1[2, ...], c='red', linestyle='dotted', linewidth=1.5)
+                ax.plot(xyz2[0, ...], xyz2[1, ...], xyz2[2, ...], c='red', linestyle='dotted', linewidth=1.5)
+                if plot_input:
+                    ax.legend(["Origin", output_samples_tag, "Gaussian Samples", "True Signal", "Phase Manifold"])  
+                else:
+                    ax.legend(["Origin", output_samples_tag, "True Signal", "Phase Manifold"])  
             else:
-                ax.legend(["Origin", "Conditioned Samples", "Gaussian Samples"])
+                if plot_input:
+                    ax.legend(["Origin", output_samples_tag, "Gaussian Samples"])
+                else:
+                    ax.legend(["Origin", output_samples_tag])
         else:
-            ax.legend(["Origin", "Samples"])
+            ax.legend(["Origin", output_samples_tag])
         # Xs = torch.arange(-3, 3, 0.1)
         # Ys = torch.arange(-3, 3, 0.1)
         # X, Y = torch.meshgrid((Xs, Ys), indexing='xy')
@@ -251,6 +304,11 @@ if __name__ == "__main__":
         ax.set_xlabel("x")
         ax.set_ylabel("y")
         ax.set_zlabel("z")
+
+        ax.view_init(elev=35, azim=-45, roll=0)
+
+        plt.savefig("./../figs/moment_likelihood/fig.svg")
+
         plt.show()
     elif signal_true.shape[0] == 1:
         fig, ax = plt.subplots(1, 2, sharey=True, tight_layout=True)
