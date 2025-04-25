@@ -176,8 +176,9 @@ def pwrspec_CLT_score_comps(
 #     return out
     
 if __name__ == "__main__":
-    x_new = torch.randn(11)
-    z = torch.randn(11)**2
+    x_new = torch.randn((11, 13))
+    z = torch.randn(13) ** 2
     M = 51
+    sigma = 1.
     
-    score = pwrspec_score(x_new, z, M)
+    score = pwrspec_score(x_new, z, M, sigma)

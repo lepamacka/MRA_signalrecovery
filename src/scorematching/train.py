@@ -4,7 +4,7 @@ from torch.optim.lr_scheduler import LinearLR
 import math
 import numpy as np
 import matplotlib.pyplot as plt
-import samplers
+import signalsamplers as samplers
 from models.scoremodels import ConvScoreModel
 from losses import loss_fn_score
 from datasets import seed_worker, ReferenceVectorSampler
@@ -117,7 +117,10 @@ if __name__ == '__main__':
     
     print(f"\nTotal time elapsed: {t_1-t_0} secs.")
     
-    PATH = "model_weights/" + model_name + "/"
+    PATH = "./../model_weights/scorematching/" 
+    if not os.path.exists(PATH):
+        raise ValueError
+    PATH = PATH + model_name + "/"
     if not os.path.exists(PATH):
         os.makedirs(PATH)
     torch.save(model.state_dict(), PATH+"weights_dict.pth")

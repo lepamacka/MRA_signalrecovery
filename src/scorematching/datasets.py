@@ -1,6 +1,6 @@
 import torch
 import math
-import samplers
+import signalsamplers as samplers
 
 # Don't know if this even works. Supposed to enable reproducibility in a dataloader with the collate_fn.
 def seed_worker(worker_id):
@@ -82,60 +82,3 @@ class ReferenceVectorSampler(torch.utils.data.IterableDataset):
             generator=self.generator, 
             device=self.device
         )
-
-# Iterator for batches. Generates transformed sample vectors for multireference alignment.
-# CURRENTLY NOT FUNCTIONAL.
-class ReferenceFourierIterator:
-    def __init__(self, 
-                 signal_fft, 
-                 length, 
-                 sigma, 
-                 epochsize, 
-                 generator=None,
-                 device='cpu'):
-        shifts = torch.randint(low=0, 
-                               high=length, 
-                               size=(epochsize), 
-                               generator=generator, 
-                               device=device)
-        shifts_fft = torch.vmap(torch.exp)(2.*math.pi*shifts) #WIP
-        self.outputs = signal_fft + sigma * torch.randn((epochsize, 1, length), 
-                                                        generator=generator, 
-                                                        device=device)
-        self.epochsize = epochsize
-        self.idx = 0
-
-    def __iter__(self):
-        if self.idx >= self.epochsize:
-            raise StopIteration()
-        item = self.outputs[self.idx, :, :]
-        self.idx += 1
-        return item
-
-# Streams fourier-transformed samples for multireference alignment problem with isotropic gaussian noise.
-# Set generator seed to enable reproducibility (doesn't seem to work?).
-# CURRENTLY NOT FUNCTIONAL
-class ReferenceFourierSampler(torch.utils.data.IterableDataset):
-    def __init__(self, 
-                 signal_fft, 
-                 length, 
-                 sigma, 
-                 epochsize, 
-                 generator=None,
-                 device='cpu'):
-        super().__init__()
-        self.signal_fft = signal_fft.to(device)
-        self.length = length
-        self.sigma = sigma
-        self.epochsize = epochsize
-        self.generator = generator
-        self.device = device
-
-    def __iter__(self):
-        return ReferenceFourierIterator(signal_fft=self.signal_fft, 
-                                        length=self.length, 
-                                        sigma=self.sigma, 
-                                        epochsize=self.epochsize, 
-                                        generator=self.generator, 
-                                        device=self.device)
-
