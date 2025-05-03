@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import functools
-from helpers import marginal_prob_std
+from . import helpers
 
 class GaussianFourierProjection(nn.Module):
     """Gaussian random features for encoding time steps."""  
@@ -128,7 +128,7 @@ if __name__ == '__main__':
     model_sigma = 5.0
 
     marginal_prob_std_fn = functools.partial(
-        marginal_prob_std, 
+        helpers.marginal_prob_std, 
         sigma=model_sigma, 
         device=device
     )

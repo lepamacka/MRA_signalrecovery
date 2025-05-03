@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import functools
-from helpers import marginal_prob_std
+from . import helpers
 
 class GaussianFourierProjection(nn.Module):
     """Gaussian random features for encoding time steps."""  

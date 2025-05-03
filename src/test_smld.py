@@ -1,16 +1,19 @@
+import os
 import torch
 import numpy as np
 import math
 import functools
 import matplotlib.pyplot as plt
 from matplotlib import animation
+from torch.fft import fft, ifft
 from smld.models.helpers import marginal_prob_std, diffusion_coeff
 from smld.signalsamplers import circulant
-from pwrspec_score import pwrspec_score
 import smld.signalsamplers as samplers
 from smld.models.convolutional import Convolutional
 from smld.models.MLP import MLP
 from smld.utils import Euler_Maruyama_sampler
+from experimental_conditioner import experimental_conditioner
+
 
 # Takes a (diffusion) score model and plots projected scores on a plane.
 # The plane passes through plane_mag*[ones] and is normal to [ones].
@@ -18,7 +21,7 @@ from smld.utils import Euler_Maruyama_sampler
 @torch.no_grad()
 def score_projector(
     t_diff, 
-    score_model, 
+    scoremodel, 
     plane_mag, 
     ax_bound=math.sqrt(2), 
     ax_pts=10, 
@@ -45,9 +48,9 @@ def score_projector(
 
     XY_P_cat = XY_P.view((XY_P.shape[0]*XY_P.shape[1], 1, XY_P.shape[2]))
 
-    if len(score_model) > 3:
+    if len(scoremodel) > 3:
         proj_diag = torch.ones(
-            (XY_P_cat.shape[0], 1, len(score_model)-3), 
+            (XY_P_cat.shape[0], 1, len(scoremodel)-3), 
             device=device
         )
         XY_P_cat = torch.cat(
@@ -55,14 +58,13 @@ def score_projector(
             dim=2,
         )
     
-    S_P_cat = torch.vmap(score_model)(
+    t = t_diff*torch.ones((1,), device=device)
+    S_P_cat = torch.vmap(scoremodel)(
         XY_P_cat, 
-        t=t_diff*torch.ones((1,), device=device),
+        t=t,
     )
-    print(S_P_cat.mean())
     if conditioner != None:
-        S_P_cat += conditioner(XY_P_cat)
-    print(S_P_cat.mean())
+        S_P_cat += conditioner(XY_P_cat, t)
     S_P = S_P_cat[:, :, :3].view(XY_P.shape)
     S = torch.einsum('ij, klj -> kli', P, S_P)
     return S, XY, P
@@ -73,12 +75,17 @@ if __name__ == "__main__":
     generator = torch.Generator(device=device) 
     generator.seed()
 
+    # MRA parameters
+    MRA_sigma = 1.
+
+    # Conditioner parameters
+    use_CLT = True
+
     # Choose a model class to be loaded and corresponding base signal.
-    
     # Set diffusion model parameters of trained model.
     hidden_layers = 5
-    hidden_dim = 32
-    embed_dim = 32
+    hidden_dim = 16
+    embed_dim = 16
     model_sigma = 2.5
 
     # Set signal parameters, same as those used to train model.
@@ -88,12 +95,15 @@ if __name__ == "__main__":
 
     # Set model type, signal sampler type.
     # Trained model must exist on PATH.
+    PATH = "/mnt/data0/axejan/MRA_model_weights/smld/" 
+    assert os.path.exists(PATH), "PATH must exist."
+
     marginal_prob_std_fn = functools.partial(
         marginal_prob_std, 
         sigma=model_sigma, 
         device=device,
     )
-    score_model = Convolutional(
+    scoremodel = Convolutional(
         marginal_prob_std_fn, 
         length, 
         hidden_dim, 
@@ -102,7 +112,7 @@ if __name__ == "__main__":
     ).to(device)
 
     model_path_name = "_".join((
-        f"{str(score_model)}",
+        f"{str(scoremodel)}",
         f"len{length}",
         f"lay{hidden_layers}",
         f"hid{hidden_dim}",
@@ -110,7 +120,7 @@ if __name__ == "__main__":
         f"sigma{model_sigma}",
         f"{signal_sampler_str}{signal_scale}",
     ))
-    PATH = "./../model_weights/smld/" + model_path_name + "/"
+    PATH = PATH + model_path_name + "/"
     print(PATH)
     signal = torch.load(PATH+"signal.pth", weights_only=True).to(device)
     signal_sampler = samplers.DegenerateLoop(
@@ -120,36 +130,59 @@ if __name__ == "__main__":
         generator=generator, 
         device=device,
     )
-    score_model.load_state_dict(torch.load(PATH+"weights_dict.pth", weights_only=True))
-    score_model.eval()
+    scoremodel.load_state_dict(torch.load(PATH+"weights_dict.pth", weights_only=True))
+    scoremodel.eval()
 
     # Set parameters for diffusion sampler.
     diffusion_steps = 1000
-    diffusion_samples = 1000
+    diffusion_samples = 2**8
     diffusion_epsilon = 1e-3
     model_sampler = Euler_Maruyama_sampler
 
     # Set parameters for conditional diffusion sampling.
-    M = 10
-    signal_true = circulant(signal_sampler(do_random_shifts=False), dim = 1).squeeze(0)
-    signal_for_pwrspec = signal_true[0, :]
-    signal_for_pwrspec += 1e-2*torch.randn(
-        signal.shape,
-        generator=generator,
+    M = 1000
+    use_random_pwrspec = True
+
+    circulant_true = circulant(signal_sampler(do_random_shifts=False), dim = 1).squeeze(0)
+    signal_true = circulant_true[0, :]
+    # signal_for_pwrspec += 1e-2*torch.randn(
+    #     signal.shape,
+    #     generator=generator,
+    #     device=device,
+    # )
+    pwrspec_true = torch.abs(fft(signal_true, norm='ortho')).square()
+
+    MRA_sampler = samplers.Gaussian(
+        sigma=MRA_sigma, 
+        signal=signal_true, 
+        length=length, 
         device=device,
     )
-    sample_pwrspec = torch.abs(torch.fft.fft(signal_for_pwrspec))**2
+    MRA_samples = MRA_sampler(num=M, do_random_shifts=True)
+
+    if use_random_pwrspec:
+        sample_pwrspec = torch.abs(fft(MRA_samples, norm='ortho')).square().mean(dim=0)
+    else:
+        sample_pwrspec = pwrspec_true + (MRA_sigma ** 2)
+    pwrspec_est = sample_pwrspec - (MRA_sigma ** 2)
+
+    even = True if length%2 == 0 else False
+    # print("even is " + str(even))
     conditioner = functools.partial(
-        pwrspec_score,
-        z=sample_pwrspec,
+        experimental_conditioner,
+        marginal_prob_std_fn=marginal_prob_std_fn,
+        rho_est=pwrspec_est,
         M=M,
+        MRA_sigma=MRA_sigma,
+        even=even,
+        use_CLT=use_CLT,
         device=device,
     )
-    conditioner = None
+    # conditioner = None
 
     # Set parameters for visualization of scores across diffusion time.
     num_steps = 200
-    t_diff_init = 1e-3
+    t_diff_init = 1e-2
     ax_bound = 2
     ax_pts = 20
     plane_mag = signal.mean().item()
@@ -161,7 +194,7 @@ if __name__ == "__main__":
         device=device,
     )
     model_samples = model_sampler(
-        score_model=score_model, 
+        scoremodel=scoremodel, 
         marginal_prob_std=marginal_prob_std_fn,
         diffusion_coeff=diffusion_coeff_fn, 
         length=length,
@@ -171,6 +204,15 @@ if __name__ == "__main__":
         conditioner=conditioner,
         device=device,
     ).squeeze()
+
+    ## Print metrics
+    outputs_pwrspec_rmsd = (torch.abs(fft(model_samples, norm='ortho')).square() - pwrspec_true).square().mean(dim=-1).sqrt()
+
+    print(f"Average RMSD between sample power spectra and the true power spectrum is: {outputs_pwrspec_rmsd.mean().item():.2f}")
+
+    outputs_rmsd = (model_samples.unsqueeze(1) - circulant_true).square().mean(dim=-1).sqrt().min(dim=-1)[0]
+
+    print(f"Average RMSD between model samples and the true signal is: {outputs_rmsd.mean().item():.2f}")
 
     # Generate signal samples
     signal_samples = signal_sampler(num=diffusion_samples, do_random_shifts=True)
@@ -184,14 +226,17 @@ if __name__ == "__main__":
             model_samples[:,1].to('cpu'), 
             model_samples[:,2].to('cpu'), 
             c='b',
+            marker='.',
             label='model samples',
         )
         if conditioner != None:
             ax.scatter(
-                signal_true[:,0].to('cpu'), 
-                signal_true[:,1].to('cpu'), 
-                signal_true[:,2].to('cpu'), 
+                signal_true[0].to('cpu'), 
+                signal_true[1].to('cpu'), 
+                signal_true[2].to('cpu'), 
                 c='r',
+                marker='*',
+                linewidth=4.,
                 label='true signal',
             )
             ax.legend(['model samples', 'true_signal'])
@@ -211,14 +256,17 @@ if __name__ == "__main__":
             signal_samples[:,1].to('cpu'), 
             signal_samples[:,2].to('cpu'), 
             c='g',
+            marker='.',
             label='signal samples',
         )
         if conditioner != None:
             ax.scatter(
-                signal_true[:, 0].to('cpu'), 
-                signal_true[:, 1].to('cpu'), 
-                signal_true[:, 2].to('cpu'), 
+                signal_true[0].to('cpu'), 
+                signal_true[1].to('cpu'), 
+                signal_true[2].to('cpu'), 
                 c='r',
+                marker='*',
+                linewidth=4.,
                 label='true signal',
             )
             ax.legend(['signal samples', 'true_signal'])
@@ -239,6 +287,7 @@ if __name__ == "__main__":
             signal_samples[:,1].to('cpu'), 
             signal_samples[:,2].to('cpu'), 
             c='g', 
+            marker='.',
             label='signal samples',
         )
         ax.scatter(
@@ -246,14 +295,17 @@ if __name__ == "__main__":
             model_samples[:,1].to('cpu'), 
             model_samples[:,2].to('cpu'), 
             c='b', 
+            marker='.',
             label='model samples',
         )
         if conditioner != None:
             ax.scatter(
-                signal_true[:,0].to('cpu'), 
-                signal_true[:,1].to('cpu'), 
-                signal_true[:,2].to('cpu'), 
+                signal_true[0].to('cpu'), 
+                signal_true[1].to('cpu'), 
+                signal_true[2].to('cpu'), 
                 c='r',
+                marker='*',
+                linewidth=4.,
                 label='true signal',
             )
             ax.legend(['signal samples', 'model samples', 'true_signal'])
@@ -266,7 +318,7 @@ if __name__ == "__main__":
 
     F1 = functools.partial(
         score_projector, 
-        score_model=score_model, 
+        scoremodel=scoremodel, 
         conditioner=None,
         plane_mag=plane_mag, 
         ax_bound=ax_bound,
@@ -293,7 +345,7 @@ if __name__ == "__main__":
 
     F2 = functools.partial(
         score_projector, 
-        score_model=score_model, 
+        scoremodel=scoremodel, 
         conditioner=conditioner,
         plane_mag=plane_mag, 
         ax_bound=ax_bound,
@@ -326,8 +378,6 @@ if __name__ == "__main__":
     plt.title(f"Projection of conditional 3D-scores at diffusion time {t_diff_init}")
     fig.tight_layout()
     plt.savefig('./../figs/smld/conditionalscores.png')
-
-    plt.show()
 
     # def update_quiver(n, T, Q, X, Y, F):
     #     S_n, _, _ = F(T[n-1])

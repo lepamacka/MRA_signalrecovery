@@ -39,6 +39,6 @@ def Euler_Maruyama_sampler(
             g = diffusion_coeff(batch_time_step)
             mean_x = x + (g**2)[:, None] * scoremodel(x, batch_time_step) * step_size
             if conditioner is not None:
-                mean_x += (g**2)[:, None] * conditioner(x) * step_size
+                mean_x += (g**2)[:, None] * conditioner(x, time_step) * step_size
             x = mean_x + torch.sqrt(step_size) * g[:, None] * torch.randn_like(x)      
     return mean_x

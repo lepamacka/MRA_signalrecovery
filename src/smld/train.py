@@ -34,12 +34,12 @@ if __name__ == '__main__':
     )
 
     hidden_layers = 5
-    hidden_dim = 32
-    embed_dim = 32
+    hidden_dim = 16
+    embed_dim = 16
     model_sigma = 2.5
 
     batch_size = 2**8
-    batch_num = 2**12
+    batch_num = 2**8
     n_epochs = 100
     learning_rate = 1e-4
     digs = int(math.log10(n_epochs))+1
@@ -73,8 +73,14 @@ if __name__ == '__main__':
         f"{str(signal_sampler)}{signal_scale}",
     ))
     
-    PATH = "./../model_weights/smld/" + model_path_name + "/" # Not location safe.
-    print(f"Model will be saved in \'{PATH}\'") 
+    PATH = "/mnt/data0/axejan/MRA_model_weights/smld/" 
+    assert os.path.exists(PATH), "PATH must exist."
+
+    PATH = PATH + model_path_name + "/" # Not location safe.
+    if not os.path.exists(PATH):
+        os.makedirs(PATH)
+    
+    print(f"Model weights will be saved in \'{PATH}\'") 
     
     dataset = IterableDatasetMRA(
         signal_sampler=signal_sampler, 
@@ -141,11 +147,5 @@ if __name__ == '__main__':
     
     print(f"\nTotal time elapsed: {t_1-t_0} secs.")
     
-    PATH = "./../model_weights/smld/" 
-    if not os.path.exists(PATH):
-        raise ValueError
-    PATH = PATH + model_name + "/"
-    if not os.path.exists(PATH):
-        os.makedirs(PATH)
     torch.save(model.state_dict(), PATH+"weights_dict.pth")
     torch.save(signal, PATH+"signal.pth")
