@@ -61,8 +61,8 @@ if __name__ == "__main__":
 
     ### Set parameters for conditioner
     use_random_pwrspec = False
-    use_CLT = False
-    use_none_cond = True
+    use_CLT = True
+    use_none_cond = False
 
     ### Set parameters for score model
     scoremodel_type = "gaussian" # "gaussian", "learned", "none"
@@ -89,7 +89,7 @@ if __name__ == "__main__":
     ### Set parameters for plotting
     plot_output_only = True
     plot_input = False
-    plot_MRA_samples = True
+    plot_MRA_samples = False
 
 
     ## Conditioner

@@ -12,6 +12,3 @@ dependencies = [
     "torch>=2.5.1",
     "torchtyping>=0.1.5",
 ]
-
-[tool.uv]
-cache-dir = "/mimer/NOBACKUP/groups/bengt/axejan/.cache/uv"
