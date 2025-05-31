@@ -48,7 +48,7 @@ if __name__ == "__main__":
     print(f"Current device is \'{device}\'.")
 
     ### Set parameters for MRA
-    M = round(1e9)
+    M = 1_000_000_000
     sigma = 10.
 
     ### Set parameters for true signal
