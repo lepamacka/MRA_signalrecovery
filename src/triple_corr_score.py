@@ -46,8 +46,8 @@ def triple_corr_score_3(
     mu_init[0, 0] += 1.
     mu_init[0, :] += 1.
     mu_init[:, 0] += 1.
-    mu_init[1, 2] += 1
-    mu_init[2, 1] += 1
+    mu_init[1, 2] += 1.
+    mu_init[2, 1] += 1.
     mu_init *= sigma ** 2
     mu_base = torch.einsum('..., ij -> ...ij', torch.sum(x_new, dim=-1), mu_init)
     mu_base += compute_triple_corr(x_new, average=False, device=device)
