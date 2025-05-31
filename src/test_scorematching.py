@@ -107,7 +107,7 @@ if __name__ == "__main__":
     samples = MRA_sampler(num=M, do_random_shifts=True)
     if use_random_statistic:
         sample_pwrspec = torch.abs(fft(samples, norm='ortho')).square().mean(dim=0)
-        sample_triple_corr = compute_triple_corr(samples, device=device)
+        sample_triple_corr = compute_triple_corr(samples, average=True, device=device)
         print(sample_triple_corr)
     else:
         sample_pwrspec = pwrspec_true + sigma ** 2

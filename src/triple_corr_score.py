@@ -42,10 +42,13 @@ def triple_corr_score_3(
     covar_proj = torch.einsum('ik, kl -> il', proj_op, torch.einsum('ij, kj -> ik', covar, proj_op))
     covar_proj_inv = torch.inverse(covar_proj)
     
-    mu_init = torch.eye(3, device=device)
+    mu_init = torch.zeros(size=(3, 3), device=device)
+    mu_init[0, 0] += 1.
     mu_init[0, :] += 1.
     mu_init[:, 0] += 1.
-    mu_init *= sigma ** 2 / 3.
+    mu_init[1, 2] += 1
+    mu_init[2, 1] += 1
+    mu_init *= sigma ** 2
     mu_base = torch.einsum('..., ij -> ...ij', torch.sum(x_new, dim=-1), mu_init)
     mu_base += compute_triple_corr(x_new, average=False, device=device)
     mu_base_unfolded = unfold_3(mu_base, device=device)
@@ -56,10 +59,11 @@ def triple_corr_score_3(
     score = torch.zeros_like(x_new)
     for k in range(3):
         if CLT:
-            d_mu_d_xk = mu_init + torch.zeros_like(mu_base)
+            d_mu_d_xk = torch.zeros_like(mu_base)
+            d_mu_d_xk += mu_init
             for dim_1 in range(3):
                 for dim_2 in range(3):
-                    d_mu_d_xk[..., dim_1, dim_2] += (1. / 3.) * (
+                    d_mu_d_xk[..., dim_1, dim_2] += (
                         x_new[..., (k-dim_1)%3] * x_new[..., (k+dim_2)%3]
                         + x_new[..., (k+dim_1)%3] * x_new[..., (k+dim_1+dim_2)%3]
                         + x_new[..., (k-dim_2)%3] * x_new[..., (k-dim_1-dim_2)%3]
@@ -102,15 +106,26 @@ def compute_triple_corr(data, average=True, device='cpu'):
         triple_corr = torch.zeros(size=data.shape[:-1]+(length, length), device=device)
     for dim_1 in range(length):
         for dim_2 in range(length):
-            tmp = (1. / length) * torch.einsum(
-                '...i, ...i -> ...',
+            tmp = torch.mean(
                 torch.einsum(
                     '...i, ...i -> ...i',
-                    data_circulant[..., dim_1, :],
-                    data_circulant[..., -dim_2, :],
+                    torch.einsum(
+                        '...i, ...i -> ...i',
+                        data_circulant[..., -dim_1, :],
+                        data_circulant[..., dim_2, :],
+                    ),
+                    data_circulant[..., 0, :],
                 ),
-                data,
+                dim=-1,
             )
+            # print("here")
+            # print(torch.einsum(
+            #         '...i, ...i -> ...i',
+            #         data_circulant[..., -dim_1, :],
+            #         data_circulant[..., dim_2, :],
+            #     ))
+            # print(data_circulant[..., 0, :])
+            # print(tmp)
             if average:
                 triple_corr[dim_1, dim_2] = torch.mean(tmp)
             else:
@@ -120,22 +135,22 @@ def compute_triple_corr(data, average=True, device='cpu'):
 if __name__ == "__main__":
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    M = 10000
-    num_score_samples = 2
+    M = 100
+    num_score_samples = 3
     sigma = 10.
     signal_true = torch.tensor([1., 0., 0.], device=device)
     data = signal_true + sigma * torch.randn(M, 3, device=device)
 
+    # print(compute_triple_corr(signal_true, device=device))
+
     triple_corr = compute_triple_corr(data, device=device)
     print(triple_corr)
-
-    input = sigma * torch.randn(num_score_samples, 3, device=device)
+    input = signal_true + 0.1 * torch.randn(num_score_samples, 3, device=device)
     score = triple_corr_score_3(
         x=input,
         triple_corr=triple_corr,
         M=M,
         sigma=sigma,
     )
-
     print(score)
 
