@@ -6,10 +6,11 @@ import functools
 import matplotlib.pyplot as plt
 from torchtyping import TensorType
 from scorematching.signalsamplers import circulant
-from pwrspec_score import pwrspec_score
 from scorematching.utils import Langevin_sampler
 from scorematching.models.scoremodels import ConvScoreModel
 from scorematching.signalsamplers import Gaussian
+from pwrspec_score import pwrspec_score
+from triple_corr_score import triple_corr_score_3, compute_triple_corr
 
 # A simple score model, standard gaussian centered at 0.
 class GaussianScoreModel(torch.nn.Module):
@@ -47,35 +48,35 @@ if __name__ == "__main__":
     print(f"Current device is \'{device}\'.")
 
     ### Set parameters for MRA
-    M = 100
-    sigma = 1.
+    M = round(1e9)
+    sigma = 10.
 
     ### Set parameters for true signal
     length = 3
     signal_true = torch.zeros((length,), device=device, requires_grad=False)
-    # signal_true[0] = np.sqrt(length)
-    signal_true[0] = 2.
+    signal_true[0] = 1.
 
     # signal_true = 1. * torch.ones((length,), device=device, requires_grad=False)
     # signal_true += 0.5 * torch.randn_like(signal_true)
 
     ### Set parameters for conditioner
-    use_random_pwrspec = False
+    conditioner_type = "triplecorr" # "pwrspec", "triplecorr"
+    use_random_statistic = True
     use_CLT = True
     use_none_cond = False
 
     ### Set parameters for score model
-    scoremodel_type = "gaussian" # "gaussian", "learned", "none"
+    scoremodel_type = "none" # "gaussian", "learned", "none"
     
     ### Set parameters for gaussian score model
-    mean = torch.zeros_like(signal_true)
-    A = torch.eye(n=length, device=device)
-    # mean = torch.tensor([0., 0., 0.], device=device)
-    # A = torch.tensor([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], device=device)
-    # mean = torch.tensor([2., 0., 0.], device=device)
-    # A = 0.5 * torch.tensor([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], device=device)
-    # mean = torch.tensor([6., 0., 0.], device=device)
-    # A = torch.tensor([[3., 0., 0.], [0., 0.5, 0.], [0., 0., 0.5]], device=device)
+    prior_mean = torch.zeros_like(signal_true)
+    prior_A = torch.eye(n=length, device=device)
+    # prior_mean = torch.tensor([0., 0., 0.], device=device)
+    # prior_A = torch.tensor([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], device=device)
+    # prior_mean = torch.tensor([2., 0., 0.], device=device)
+    # prior_A = 0.5 * torch.tensor([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], device=device)
+    # prior_mean = torch.tensor([6., 0., 0.], device=device)
+    # prior_A = torch.tensor([[3., 0., 0.], [0., 0.5, 0.], [0., 0., 0.5]], device=device)
 
     ### Set parameters for learned score model
     PATH = None # If None it will try to find a compatible model.
@@ -83,18 +84,19 @@ if __name__ == "__main__":
 
     ### Set parameters for Langevin sampling
     num_steps = 1000
-    num_samples = 2 ** 9
-    eps = 1e-3
+    num_samples = 2 ** 6
+    eps = 1e-4
 
     ### Set parameters for plotting
-    plot_output_only = True
-    plot_input = False
+    plot_output_only = False
+    plot_input = True
     plot_MRA_samples = False
 
 
     ## Conditioner
     circulant_true = circulant(signal_true, dim=0)
     pwrspec_true = torch.abs(fft(signal_true, norm='ortho')).square()
+    triple_corr_true = compute_triple_corr(signal_true, device=device)
 
     MRA_sampler = Gaussian(
         sigma=sigma, 
@@ -103,15 +105,16 @@ if __name__ == "__main__":
         device=device,
     )
     samples = MRA_sampler(num=M, do_random_shifts=True)
-
-    if use_random_pwrspec:
+    if use_random_statistic:
         sample_pwrspec = torch.abs(fft(samples, norm='ortho')).square().mean(dim=0)
+        sample_triple_corr = compute_triple_corr(samples, device=device)
+        print(sample_triple_corr)
     else:
         sample_pwrspec = pwrspec_true + sigma ** 2
     
     if use_none_cond:
         conditioner = None
-    else:
+    elif conditioner_type == "pwrspec":
         conditioner = functools.partial(
             pwrspec_score,
             rho=sample_pwrspec,
@@ -120,12 +123,26 @@ if __name__ == "__main__":
             device=device,
             CLT=use_CLT,
         )
+    elif conditioner_type == "triplecorr":
+        if length == 3:
+            conditioner = functools.partial(
+                triple_corr_score_3,
+                triple_corr=sample_triple_corr,
+                M=M,
+                sigma=sigma,
+                device=device,
+                CLT=use_CLT,
+            )
+        else:
+            raise NotImplementedError
+    else:
+        raise NotImplementedError
     
 
     ## Score model
     if scoremodel_type == "gaussian":
-        covar_mat = torch.einsum('ij, kj -> ik', A, A)
-        scoremodel = GaussianScoreModel(mean, covar_mat).to(device)
+        covar_mat = torch.einsum('ij, kj -> ik', prior_A, prior_A)
+        scoremodel = GaussianScoreModel(prior_mean, covar_mat).to(device)
     elif scoremodel_type == "learned":
         if PATH is None:
             PATH = f"./../model_weights/scorematching/MRA_convscoremodel_length{length}_hiddim{hiddendim}/"
@@ -141,14 +158,21 @@ if __name__ == "__main__":
 
 
     ## Generate input samples
-    input = signal_true.std()*torch.randn(
-        size=(num_samples, signal_true.shape[-1]), 
-        device=device,
-        requires_grad=False,
-    )
-    # input = torch.einsum('ij, ...j -> ...i', A, input)
-    # input += mean
+    # input = torch.randn(
+    #     size=(num_samples, signal_true.shape[-1]), 
+    #     device=device,
+    #     requires_grad=False,
+    # )
+    # input = torch.einsum('ij, ...j -> ...i', prior_A, input)
+    # input += prior_mean
     
+    input_sampler = Gaussian(
+        sigma=0.1, 
+        signal=signal_true, 
+        length=length, 
+        device=device,
+    )
+    input = input_sampler(num=num_samples, do_random_shifts=True)
 
     ## Run Langevin sampling
     output = Langevin_sampler(
