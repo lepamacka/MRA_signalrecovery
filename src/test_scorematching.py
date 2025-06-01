@@ -9,8 +9,10 @@ from scorematching.signalsamplers import circulant
 from scorematching.utils import Langevin_sampler
 from scorematching.models.scoremodels import ConvScoreModel
 from scorematching.signalsamplers import Gaussian
+from plotting import score_projector
 from pwrspec_score import pwrspec_score
 from triple_corr_score import triple_corr_score_3, compute_triple_corr
+
 
 # A simple score model, standard gaussian centered at 0.
 class GaussianScoreModel(torch.nn.Module):
@@ -48,7 +50,7 @@ if __name__ == "__main__":
     print(f"Current device is \'{device}\'.")
 
     ### Set parameters for MRA
-    M = 100000
+    M = 20000000
     sigma = 10.
 
     ### Set parameters for true signal
@@ -61,7 +63,7 @@ if __name__ == "__main__":
 
     ### Set parameters for conditioner
     conditioner_type = "triplecorr" # "pwrspec", "triplecorr"
-    use_random_statistic = True
+    use_random_statistic = False
     use_CLT = True
     use_none_cond = False
 
@@ -83,15 +85,20 @@ if __name__ == "__main__":
     hiddendim = 8
 
     ### Set parameters for Langevin sampling
-    num_steps = 1000
+    num_steps = 200000
     num_samples = 2 ** 6
-    eps = 1e-4
+    eps = 1e-6
 
     ### Set parameters for plotting
     plot_output_only = False
     plot_input = True
     plot_MRA_samples = False
+    plot_projection = True
 
+    ### Set parameters for visualization of scores
+    ax_bound = 0.8
+    ax_pts = 20
+    plane_mag = signal_true.mean().item()
 
     ## Conditioner
     circulant_true = circulant(signal_true, dim=0)
@@ -111,7 +118,15 @@ if __name__ == "__main__":
         print(sample_triple_corr)
     else:
         sample_pwrspec = pwrspec_true + sigma ** 2
-    
+        sample_triple_corr = torch.zeros(size=(3, 3), device=device)
+        sample_triple_corr[0, 0] += 1.
+        sample_triple_corr[0, :] += 1.
+        sample_triple_corr[:, 0] += 1.
+        sample_triple_corr[1, 2] += 1.
+        sample_triple_corr[2, 1] += 1.
+        sample_triple_corr *= sigma ** 2 * torch.mean(signal_true)
+        sample_triple_corr += triple_corr_true
+
     if use_none_cond:
         conditioner = None
     elif conditioner_type == "pwrspec":
@@ -147,6 +162,8 @@ if __name__ == "__main__":
         if PATH is None:
             PATH = f"./../model_weights/scorematching/MRA_convscoremodel_length{length}_hiddim{hiddendim}/"
             PATH = os.path.join(PATH, "weights_dict.pth")
+        if not os.path.exists(PATH):
+            raise ValueError(f"Could not find {PATH = }")
         scoremodel = ConvScoreModel(length=length, hiddendim=hiddendim).to(device)
         state_dict = torch.load(PATH, weights_only=True, map_location=device)
         scoremodel.load_state_dict(state_dict)
@@ -158,21 +175,21 @@ if __name__ == "__main__":
 
 
     ## Generate input samples
-    # input = torch.randn(
-    #     size=(num_samples, signal_true.shape[-1]), 
-    #     device=device,
-    #     requires_grad=False,
-    # )
+    input = torch.randn(
+        size=(num_samples, signal_true.shape[-1]), 
+        device=device,
+        requires_grad=False,
+    )
     # input = torch.einsum('ij, ...j -> ...i', prior_A, input)
     # input += prior_mean
     
-    input_sampler = Gaussian(
-        sigma=0.1, 
-        signal=signal_true, 
-        length=length, 
-        device=device,
-    )
-    input = input_sampler(num=num_samples, do_random_shifts=True)
+    # input_sampler = Gaussian(
+    #     sigma=0.1, 
+    #     signal=signal_true, 
+    #     length=length, 
+    #     device=device,
+    # )
+    # input = input_sampler(num=num_samples, do_random_shifts=True)
 
     ## Run Langevin sampling
     output = Langevin_sampler(
@@ -332,15 +349,75 @@ if __name__ == "__main__":
         ax.view_init(elev=35, azim=-45, roll=0)
 
         # plt.savefig("./../figs/scorematching/moment_likelihood/fig.svg")
-
-        plt.show()
     elif signal_true.shape[0] == 1:
         fig, ax = plt.subplots(1, 2, sharey=True, tight_layout=True)
         ax[0].hist(input)
         ax[1].hist(output)
         ax[0].plot(signal_true, 0*signal_true, 'd')
         ax[1].plot(signal_true, 0*signal_true, 'd')
-        plt.show()
 
+    if signal_true.shape[0] == 3 and plot_projection:
+        if not scoremodel is None:
+            S1, XY1, P1 = score_projector(
+                t_diff=0,
+                scoremodel=scoremodel, 
+                conditioner=None,
+                plane_mag=plane_mag, 
+                ax_bound=ax_bound,
+                ax_pts=ax_pts,
+                device=device,
+            )
+            XY1 = XY1.to('cpu')
+            S1 = S1.to('cpu')
+
+            fig1, ax1 = plt.subplots()
+            Q1 = ax1.quiver(
+                XY1[:, :, 0], 
+                XY1[:, :, 1], 
+                S1[:, :, 0], 
+                S1[:, :, 1],
+            )
+            ax1.set_aspect('equal', 'box')
+            centers = plt.scatter(
+                (P1 @ circulant(signal_true[:3], 0)).to('cpu')[0, :], 
+                (P1 @ circulant(signal_true[:3], 0)).to('cpu')[1, :],
+            ) 
+
+            plt.title(f"Projection of 3D-scores")
+            fig1.tight_layout()
+            plt.savefig('./../figs/scorematching/projectedscores.png')
+
+        if not use_none_cond:
+            S2, XY2, P2 = score_projector(
+                t_diff=0,
+                scoremodel=scoremodel, 
+                conditioner=conditioner,
+                plane_mag=plane_mag, 
+                ax_bound=ax_bound,
+                ax_pts=ax_pts,
+                device=device,
+            )
+            XY2 = XY2.to('cpu')
+            S2 = S2.to('cpu')
+
+            fig2, ax2 = plt.subplots()
+
+            Q2 = ax2.quiver(
+                XY2[:, :, 0], 
+                XY2[:, :, 1], 
+                S2[:, :, 0], 
+                S2[:, :, 1],
+            )
+            ax2.set_aspect('equal', 'box')
+            centers = plt.scatter(
+                (P2 @ circulant(signal_true[:3], 0)).to('cpu')[0, :], 
+                (P2 @ circulant(signal_true[:3], 0)).to('cpu')[1, :],
+            ) 
+
+            plt.title(f"Projection of conditional 3D-scores")
+            fig2.tight_layout()
+            plt.savefig('./../figs/scorematching/conditionalscores.png')
+
+    plt.show()
 
 

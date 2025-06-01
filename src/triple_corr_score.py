@@ -49,7 +49,7 @@ def triple_corr_score_3(
     mu_init[1, 2] += 1.
     mu_init[2, 1] += 1.
     mu_init *= sigma ** 2
-    mu_base = torch.einsum('..., ij -> ...ij', torch.sum(x_new, dim=-1), mu_init)
+    mu_base = torch.einsum('..., ij -> ...ij', torch.mean(x_new, dim=-1), mu_init)
     mu_base += compute_triple_corr(x_new, average=False, device=device)
     mu_base_unfolded = unfold_3(mu_base, device=device)
     mu_base_proj = torch.einsum('ij, ...j -> ...i', proj_op, mu_base_unfolded)
@@ -111,8 +111,8 @@ def compute_triple_corr(data, average=True, device='cpu'):
                     '...i, ...i -> ...i',
                     torch.einsum(
                         '...i, ...i -> ...i',
-                        data_circulant[..., -dim_1, :],
-                        data_circulant[..., dim_2, :],
+                        data_circulant[..., dim_1, :],
+                        data_circulant[..., -dim_2, :],
                     ),
                     data_circulant[..., 0, :],
                 ),
@@ -135,16 +135,27 @@ def compute_triple_corr(data, average=True, device='cpu'):
 if __name__ == "__main__":
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    M = 100
-    num_score_samples = 3
-    sigma = 10.
+    M = 1000
+    num_score_samples = 5
+    sigma = 1.
     signal_true = torch.tensor([1., 0., 0.], device=device)
     data = signal_true + sigma * torch.randn(M, 3, device=device)
 
-    # print(compute_triple_corr(signal_true, device=device))
+    print(compute_triple_corr(signal_true, device=device))
 
     triple_corr = compute_triple_corr(data, device=device)
     print(triple_corr)
+    triple_corr = torch.zeros(size=(3, 3), device=device)
+    triple_corr[0, 0] += 1.
+    triple_corr[0, :] += 1.
+    triple_corr[:, 0] += 1.
+    triple_corr[1, 2] += 1.
+    triple_corr[2, 1] += 1.
+    triple_corr *= sigma ** 2
+    triple_corr = torch.einsum('..., ij -> ...ij', torch.mean(signal_true), triple_corr)
+    triple_corr += compute_triple_corr(signal_true, average=False, device=device)
+    print(triple_corr)
+
     input = signal_true + 0.1 * torch.randn(num_score_samples, 3, device=device)
     score = triple_corr_score_3(
         x=input,

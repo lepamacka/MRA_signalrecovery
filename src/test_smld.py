@@ -13,61 +13,7 @@ from smld.models.convolutional import Convolutional
 from smld.models.MLP import MLP
 from smld.utils import Euler_Maruyama_sampler
 from experimental_conditioner import experimental_conditioner
-
-
-# Takes a (diffusion) score model and plots projected scores on a plane.
-# The plane passes through plane_mag*[ones] and is normal to [ones].
-# This projects the first 3 components.
-@torch.no_grad()
-def score_projector(
-    t_diff, 
-    scoremodel, 
-    plane_mag, 
-    ax_bound=math.sqrt(2), 
-    ax_pts=10, 
-    conditioner=None,
-    device='cpu',
-):
-    x_pts = torch.linspace(-ax_bound, ax_bound, ax_pts)
-    y_pts = torch.linspace(-ax_bound, ax_bound, ax_pts)
-    P = torch.tensor(
-        [
-            [1./math.sqrt(2), -1./math.sqrt(2), 0.], 
-            [1./math.sqrt(6), 1./math.sqrt(6), -2./math.sqrt(6)],
-        ], 
-        device=device,
-    )
-
-    XY = torch.stack(
-        torch.meshgrid(x_pts, y_pts, indexing='ij'), 
-        dim=2
-    ).to(device)
-
-    XY_P = torch.einsum('ij, kli -> klj', P, XY) 
-    XY_P += plane_mag * torch.ones((3), device=device) 
-
-    XY_P_cat = XY_P.view((XY_P.shape[0]*XY_P.shape[1], 1, XY_P.shape[2]))
-
-    if len(scoremodel) > 3:
-        proj_diag = torch.ones(
-            (XY_P_cat.shape[0], 1, len(scoremodel)-3), 
-            device=device
-        )
-        XY_P_cat = torch.cat(
-            (XY_P_cat, plane_mag * proj_diag), 
-            dim=2,
-        )
-    
-    t = t_diff*torch.ones((1,), device=device)
-    S_P_cat = torch.vmap(scoremodel)(
-        XY_P_cat, 
-        t=t,
-    )
-    if conditioner != None:
-        S_P_cat += conditioner(XY_P_cat, t)
-    S_P = S_P_cat[:, :, :3].view(XY_P.shape)
-    S = torch.einsum('ij, klj -> kli', P, S_P)
-    return S, XY, P
+from plotting import score_projector
 
 if __name__ == "__main__":
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -343,6 +289,10 @@ if __name__ == "__main__":
         (P1 @ circulant(signal[:3], 0)).to('cpu')[1, :],
     ) 
 
+    plt.title(f"Projection of 3D-scores at diffusion time {t_diff_init}")
+    fig.tight_layout()
+    plt.savefig('./../figs/smld/projectedscores.png')
+
     F2 = functools.partial(
         score_projector, 
         scoremodel=scoremodel, 
@@ -352,10 +302,6 @@ if __name__ == "__main__":
         ax_pts=ax_pts,
         device=device,
     )
-
-    plt.title(f"Projection of 3D-scores at diffusion time {t_diff_init}")
-    fig.tight_layout()
-    plt.savefig('./../figs/smld/projectedscores.png')
 
     S2, XY2, P2 = F2(t_diff_init)
     XY2 = XY2.to('cpu')
