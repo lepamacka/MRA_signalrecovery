@@ -13,7 +13,7 @@ from smld.models.convolutional import Convolutional
 from smld.models.MLP import MLP
 from smld.utils import Euler_Maruyama_sampler
 from experimental_conditioner import experimental_conditioner
-from plotting import score_projector
+from score_projection import score_projector
 
 if __name__ == "__main__":
     device = 'cuda' if torch.cuda.is_available() else 'cpu'

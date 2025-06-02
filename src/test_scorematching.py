@@ -9,7 +9,7 @@ from scorematching.signalsamplers import circulant
 from scorematching.utils import Langevin_sampler
 from scorematching.models.scoremodels import ConvScoreModel
 from scorematching.signalsamplers import Gaussian
-from plotting import score_projector
+from score_projection import score_projector
 from pwrspec_score import pwrspec_score
 from triple_corr_score import triple_corr_score_3, compute_triple_corr
 
