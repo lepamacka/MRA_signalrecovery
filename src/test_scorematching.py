@@ -50,7 +50,7 @@ if __name__ == "__main__":
     print(f"Current device is \'{device}\'.")
 
     ### Set parameters for MRA
-    M = 200000000
+    M = 100000000
     sigma = 10.
 
     ### Set parameters for true signal
@@ -85,9 +85,9 @@ if __name__ == "__main__":
     hiddendim = 8
 
     ### Set parameters for Langevin sampling
-    num_steps = 50000
+    num_steps = 100000
     num_samples = 2 ** 6
-    eps = 2e-7
+    eps = 1e-7
 
     ### Set parameters for plotting
     plot_output_only = False
