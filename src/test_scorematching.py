@@ -50,7 +50,7 @@ if __name__ == "__main__":
     print(f"Current device is \'{device}\'.")
 
     ### Set parameters for MRA
-    M = 20000000
+    M = 200000000
     sigma = 10.
 
     ### Set parameters for true signal
@@ -62,7 +62,7 @@ if __name__ == "__main__":
     # signal_true += 0.5 * torch.randn_like(signal_true)
 
     ### Set parameters for conditioner
-    conditioner_type = "triplecorr" # "pwrspec", "triplecorr"
+    conditioner_type = "triple_correlation" # "power_spectrum", "triple_correlation"
     use_random_statistic = False
     use_CLT = True
     use_none_cond = False
@@ -85,15 +85,15 @@ if __name__ == "__main__":
     hiddendim = 8
 
     ### Set parameters for Langevin sampling
-    num_steps = 200000
+    num_steps = 50000
     num_samples = 2 ** 6
-    eps = 1e-6
+    eps = 2e-7
 
     ### Set parameters for plotting
     plot_output_only = False
-    plot_input = True
+    plot_input = False
     plot_MRA_samples = False
-    plot_projection = True
+    plot_projection = False
 
     ### Set parameters for visualization of scores
     ax_bound = 0.8
@@ -102,7 +102,7 @@ if __name__ == "__main__":
 
     ## Conditioner
     circulant_true = circulant(signal_true, dim=0)
-    pwrspec_true = torch.abs(fft(signal_true, norm='ortho')).square()
+    power_spectrum_true = torch.abs(fft(signal_true, norm='ortho')).square()
     triple_corr_true = compute_triple_corr(signal_true, device=device)
 
     MRA_sampler = Gaussian(
@@ -113,11 +113,11 @@ if __name__ == "__main__":
     )
     samples = MRA_sampler(num=M, do_random_shifts=True)
     if use_random_statistic:
-        sample_pwrspec = torch.abs(fft(samples, norm='ortho')).square().mean(dim=0)
+        sample_power_spectrum = torch.abs(fft(samples, norm='ortho')).square().mean(dim=0)
         sample_triple_corr = compute_triple_corr(samples, average=True, device=device)
         print(sample_triple_corr)
     else:
-        sample_pwrspec = pwrspec_true + sigma ** 2
+        sample_power_spectrum = power_spectrum_true + sigma ** 2
         sample_triple_corr = torch.zeros(size=(3, 3), device=device)
         sample_triple_corr[0, 0] += 1.
         sample_triple_corr[0, :] += 1.
@@ -129,16 +129,16 @@ if __name__ == "__main__":
 
     if use_none_cond:
         conditioner = None
-    elif conditioner_type == "pwrspec":
+    elif conditioner_type == "power_spectrum":
         conditioner = functools.partial(
             pwrspec_score,
-            rho=sample_pwrspec,
+            rho=sample_power_spectrum,
             M=M,
             sigma=sigma,
             device=device,
             CLT=use_CLT,
         )
-    elif conditioner_type == "triplecorr":
+    elif conditioner_type == "triple_correlation":
         if length == 3:
             conditioner = functools.partial(
                 triple_corr_score_3,
@@ -205,11 +205,11 @@ if __name__ == "__main__":
         print("Some of the output is nan or inf.")
 
     ## Print comparison of input and output
-    inputs_pwrspec_rmsd = (torch.abs(fft(input, norm='ortho')).square() - pwrspec_true).square().mean(dim=-1).sqrt()
-    outputs_pwrspec_rmsd = (torch.abs(fft(output, norm='ortho')).square() - pwrspec_true).square().mean(dim=-1).sqrt()
+    inputs_power_spectrum_rmsd = (torch.abs(fft(input, norm='ortho')).square() - power_spectrum_true).square().mean(dim=-1).sqrt()
+    outputs_power_spectrum_rmsd = (torch.abs(fft(output, norm='ortho')).square() - power_spectrum_true).square().mean(dim=-1).sqrt()
 
-    print(f"Average RMSD between input power spectra and the true power spectrum is: {inputs_pwrspec_rmsd.mean().item():.2f}")
-    print(f"Average RMSD between output power spectra and the true power spectrum is: {outputs_pwrspec_rmsd.mean().item():.2f}")
+    print(f"Average RMSD between input power spectra and the true power spectrum is: {inputs_power_spectrum_rmsd.mean().item():.2f}")
+    print(f"Average RMSD between output power spectra and the true power spectrum is: {outputs_power_spectrum_rmsd.mean().item():.2f}")
 
     inputs_rmsd = (input.unsqueeze(1) - circulant_true).square().mean(dim=-1).sqrt().min(dim=-1)[0]
     outputs_rmsd = (output.unsqueeze(1) - circulant_true).square().mean(dim=-1).sqrt().min(dim=-1)[0]
@@ -258,8 +258,8 @@ if __name__ == "__main__":
 
         ax.view_init(elev=35, azim=-45, roll=0)
 
-        # plt.savefig("./../figs/scorematching/moment_likelihood/MRA_samples.svg")
-        # plt.savefig("./../figs/scorematching/moment_likelihood/MRA_samples.png")
+        # plt.savefig(f"./../figs/scorematching/{conditioner_type}/MRA_samples.svg")
+        # plt.savefig(f"./../figs/scorematching/{conditioner_type}/MRA_samples.png")
 
         plt.show()
     elif signal_true.shape[0] >= 3:
@@ -348,7 +348,14 @@ if __name__ == "__main__":
 
         ax.view_init(elev=35, azim=-45, roll=0)
 
-        # plt.savefig("./../figs/scorematching/moment_likelihood/fig.svg")
+        plt.savefig(f"./../figs/scorematching/{conditioner_type}/fig1.png")
+        plt.savefig(f"./../figs/scorematching/{conditioner_type}/fig1.svg")
+
+        ax.view_init(elev=35, azim=45, roll=0)
+
+        plt.savefig(f"./../figs/scorematching/{conditioner_type}/fig2.png")
+        plt.savefig(f"./../figs/scorematching/{conditioner_type}/fig2.svg")
+
     elif signal_true.shape[0] == 1:
         fig, ax = plt.subplots(1, 2, sharey=True, tight_layout=True)
         ax[0].hist(input)
@@ -385,7 +392,7 @@ if __name__ == "__main__":
 
             plt.title(f"Projection of 3D-scores")
             fig1.tight_layout()
-            plt.savefig('./../figs/scorematching/projectedscores.png')
+            plt.savefig(f'./../figs/scorematching/{conditioner_type}/unconditionalscores.png')
 
         if not use_none_cond:
             S2, XY2, P2 = score_projector(
@@ -416,8 +423,8 @@ if __name__ == "__main__":
 
             plt.title(f"Projection of conditional 3D-scores")
             fig2.tight_layout()
-            plt.savefig('./../figs/scorematching/conditionalscores.png')
+            plt.savefig(f'./../figs/scorematching/{conditioner_type}/conditionalscores.png')
 
-    plt.show()
+    # plt.show()
 
 

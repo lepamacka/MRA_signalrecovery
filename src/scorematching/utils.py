@@ -1,6 +1,7 @@
 import torch 
 import numpy as np
 
+@torch.no_grad()
 def Langevin_sampler(
     input, 
     scoremodel=None,

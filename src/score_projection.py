@@ -87,8 +87,8 @@ if __name__ == "__main__":
     signal_true[0] = 1.
 
     ### Set parameters for conditioner
-    conditioner_type = "triple correlation" # "power spectrum", "triple correlation"
-    use_random_statistic = True
+    conditioner_type = "triple_correlation" # "power_spectrum", "triple_correlation"
+    use_random_statistic = False
     use_CLT = True
 
     ### Set parameters for visualization of scores
@@ -122,7 +122,7 @@ if __name__ == "__main__":
         sample_triple_corr *= sigma ** 2 * torch.mean(signal_true)
         sample_triple_corr += triple_corr_true
 
-    if conditioner_type == "power spectrum":
+    if conditioner_type == "power_spectrum":
         conditioner = functools.partial(
             pwrspec_score,
             rho=sample_pwrspec,
@@ -131,7 +131,7 @@ if __name__ == "__main__":
             device=device,
             CLT=use_CLT,
         )
-    elif conditioner_type == "triple correlation":
+    elif conditioner_type == "triple_correlation":
         if length == 3:
             conditioner = functools.partial(
                 triple_corr_score_3,
@@ -179,7 +179,7 @@ if __name__ == "__main__":
 
         plt.title(f"Projection of conditional 3D-scores wrt {conditioner_type}")
         fig.tight_layout()
-        plt.savefig('./../figs/scorematching/conditionalscores.png')
+        plt.savefig(f'./../figs/scorematching/{conditioner_type}/conditionalscores.png')
 
     plt.show()
 
