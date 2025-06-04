@@ -6,7 +6,7 @@ from pwrspec_score import pwrspec_score
 def experimental_conditioner(
     x_t,
     t,
-    marginal_prob_std_fn,
+    diffusion_coeff,
     rho_est,
     M,
     MRA_sigma,
@@ -14,7 +14,7 @@ def experimental_conditioner(
     use_CLT,
     device,
 ):
-    sigma_t = marginal_prob_std_fn(t)
+    sigma_t = diffusion_coeff(t)
 
     rho_t = rand_pwrspec_cond(
         rho_est=rho_est, 

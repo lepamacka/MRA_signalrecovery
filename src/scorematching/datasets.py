@@ -3,10 +3,10 @@ import math
 import signalsamplers as samplers
 
 # Don't know if this even works. Supposed to enable reproducibility in a dataloader with the collate_fn.
-def seed_worker(worker_id):
-    worker_seed = torch.initial_seed() % 2**32
-    np.random.seed(worker_seed)
-    random.seed(worker_seed)
+# def seed_worker(worker_id):
+#     worker_seed = torch.initial_seed() % 2**32
+#     np.random.seed(worker_seed)
+#     random.seed(worker_seed)
 
 # Iterator for batches. Generates sample vectors for multireference alignment.
 class ReferenceVectorIterator:

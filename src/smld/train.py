@@ -25,7 +25,7 @@ if __name__ == '__main__':
     # signal[0, :length//2] = torch.sin(2. * math.pi * torch.arange(0, length//2)/length)
     signal[0] = 1.
     signal_scale = .3
-    signal_sampler = signalsamplers.DegenerateLoop(
+    signal_sampler = signalsamplers.DegenerateLoopSampler(
         signal_scale, 
         signal, 
         length, 

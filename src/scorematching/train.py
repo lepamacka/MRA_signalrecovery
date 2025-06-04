@@ -46,7 +46,7 @@ if __name__ == '__main__':
     #     mu=signal, 
     #     sigma=signal_sigma
     # )
-    signal_sampler = samplers.DegenerateLoop(
+    signal_sampler = samplers.DegenerateLoopSampler(
         length=length, 
         signal=signal, 
         scale=1.,

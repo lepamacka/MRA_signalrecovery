@@ -8,7 +8,7 @@ from torchtyping import TensorType
 from scorematching.signalsamplers import circulant
 from scorematching.utils import Langevin_sampler
 from scorematching.models.scoremodels import ConvScoreModel
-from scorematching.signalsamplers import Gaussian
+from scorematching.signalsamplers import GaussianSampler
 from score_projection import score_projector
 from pwrspec_score import pwrspec_score
 from triple_corr_score import triple_corr_score_3, compute_triple_corr
@@ -105,7 +105,7 @@ if __name__ == "__main__":
     power_spectrum_true = torch.abs(fft(signal_true, norm='ortho')).square()
     triple_corr_true = compute_triple_corr(signal_true, device=device)
 
-    MRA_sampler = Gaussian(
+    MRA_sampler = GaussianSampler(
         sigma=sigma, 
         signal=signal_true, 
         length=length, 
@@ -183,7 +183,7 @@ if __name__ == "__main__":
     # input = torch.einsum('ij, ...j -> ...i', prior_A, input)
     # input += prior_mean
     
-    # input_sampler = Gaussian(
+    # input_sampler = GaussianSampler(
     #     sigma=0.1, 
     #     signal=signal_true, 
     #     length=length, 

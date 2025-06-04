@@ -5,7 +5,7 @@ import torch
 from torch.fft import fft
 from pwrspec_score import pwrspec_score
 from triple_corr_score import triple_corr_score_3, compute_triple_corr
-from scorematching.signalsamplers import Gaussian, circulant
+from scorematching.signalsamplers import GaussianSampler, circulant
 
 # Takes a (diffusion) score model and plots projected scores on a plane.
 # The plane passes through plane_mag*[ones] and is normal to [ones].
@@ -101,7 +101,7 @@ if __name__ == "__main__":
     pwrspec_true = torch.abs(fft(signal_true, norm='ortho')).square()
     triple_corr_true = compute_triple_corr(signal_true, device=device)
 
-    MRA_sampler = Gaussian(
+    MRA_sampler = GaussianSampler(
         sigma=sigma, 
         signal=signal_true, 
         length=length, 

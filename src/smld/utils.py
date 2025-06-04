@@ -10,6 +10,7 @@ def Euler_Maruyama_sampler(
     num_steps=500,
     eps=1e-3, 
     conditioner=None,
+    cond_start_frac=0.,
     device='cuda', 
 ):
     """Generate samples from diffusion models with the Euler-Maruyama solver.
@@ -34,11 +35,11 @@ def Euler_Maruyama_sampler(
     step_size = time_steps[0] - time_steps[1]
     x = init_x
     with torch.no_grad():
-        for time_step in time_steps:      
+        for step, time_step in enumerate(time_steps):      
             batch_time_step = torch.ones(batch_size, device=device) * time_step
             g = diffusion_coeff(batch_time_step)
             mean_x = x + (g**2)[:, None] * scoremodel(x, batch_time_step) * step_size
-            if conditioner is not None:
+            if conditioner is not None and step / num_steps >= cond_start_frac:
                 mean_x += (g**2)[:, None] * conditioner(x, time_step) * step_size
             x = mean_x + torch.sqrt(step_size) * g[:, None] * torch.randn_like(x)      
     return mean_x

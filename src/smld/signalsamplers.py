@@ -46,7 +46,7 @@ class SignalSampler:
         return self.length
 
 # This sampler is distributed around the base signal with scale sigma.
-class Gaussian(SignalSampler):
+class GaussianSampler(SignalSampler):
     def __init__(
         self, 
         sigma, 
@@ -90,7 +90,7 @@ class Gaussian(SignalSampler):
         return "gauss"
 
 # This sampler is uniformly distributed along a loop centered at signal.
-class DegenerateLoop(SignalSampler):
+class DegenerateLoopSampler(SignalSampler):
     def __init__(
         self, 
         scale, 
@@ -160,6 +160,6 @@ if __name__ == '__main__':
     scale = 1.0
     num = 10
     
-    loop_sampler = DegenerateLoop(scale, signal, length, generator, device)
+    loop_sampler = DegenerateLoopSampler(scale, signal, length, generator, device)
     res = loop_sampler(num, True)
     print(res)
