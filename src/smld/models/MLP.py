@@ -35,7 +35,7 @@ class MLP(nn.Module):
         super().__init__()
         self.marginal_prob_std = marginal_prob_std
         self.hidden_layers = hidden_layers
-
+        self.length = length
         self.act = nn.ReLU()
         self.embed = nn.Sequential(
             GaussianFourierProjection(embed_dim=embed_dim),
@@ -80,3 +80,5 @@ class MLP(nn.Module):
     def __str__(self):
         return 'mlp'
     
+    def __len__(self):
+        return self.length

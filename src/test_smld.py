@@ -19,15 +19,20 @@ class GaussianDiffusionModel(torch.nn.Module):
     def __init__(
         self, 
         mean_vec,
+        prior_sigma,
         marginal_prob_std,
     ):
         super().__init__()
 
+        assert torch.allclose(torch.ones_like(mean_vec)*torch.mean(mean_vec), mean_vec)
+
+        self.register_buffer("mean_vec", mean_vec)
+        self.prior_sigma = prior_sigma
         self.marginal_prob_std = marginal_prob_std
-        self.register_buffer("mean_vec", torch.ones_like(mean_vec)*torch.mean(mean_vec))
     
     def forward(self, x, t):
-        return (self.mean_vec - x) / self.marginal_prob_std(t)[:, None]
+        # print(self.marginal_prob_std(t)[:, None].item())
+        return (self.mean_vec - x) / ((self.prior_sigma ** 2) + (self.marginal_prob_std(t)[:, None] ** 2))
     
     def __len__(self):
         return self.mean_vec.shape[-1]
@@ -38,31 +43,33 @@ if __name__ == "__main__":
     generator = torch.Generator(device=device) 
     generator.seed()
 
-    # MRA parameters
-    M = 10000
-    MRA_sigma = 1.
-
-    # Conditioner parameters
-    use_CLT = True
-    use_random_power_spectrum = True
-    use_none_cond = True
-    cond_start_frac = 0.
-
-    # Diffusion sampler parameters
-    model_sampler = Euler_Maruyama_sampler
-    diffusion_steps = 100000
-    diffusion_samples = 2**8
-    diffusion_epsilon = 1e-6
-
     # Choose the type of diffusion score model.
     # Also set correct signal length and maximal diffusion sigma.
     scoremodel_type = "gaussian" # "gaussian", "learned"
     length = 3
-    model_sigma = 5.
+    diffusion_sigma = 25.
+
+    # Conditioner parameters
+    use_none_cond = False
+    use_CLT = False
+    use_random_power_spectrum = False
+    use_random_true_signal = False
+    cond_start_frac = 0.
+
+    # MRA parameters
+    M = 100
+    MRA_sigma = 1.
+
+    # Set true signal if not using random signal
+    signal_true = torch.zeros(length, device=device)
+    signal_true[0] = 1
 
     # Set gaussian diffusion model parameters.
-    mean_true = 1. / length
+    prior_sigma = 1.
+    mean_true = 1.
     mean_vec = mean_true * torch.ones(length, device=device)
+    if not use_random_true_signal:
+        signal_true = mean_vec
 
     # Set learned diffusion model parameters.
     # Learned model must exist on PATH.
@@ -73,13 +80,19 @@ if __name__ == "__main__":
     signal_sampler_type = "loop" 
     signal_scale = .3
 
+    # Diffusion sampler parameters
+    model_sampler = Euler_Maruyama_sampler
+    diffusion_steps = 10000
+    diffusion_samples = 2**8
+    diffusion_epsilon = 1e-7
+
     # Set parameters for plotting
-    plot_signal_samples = False
+    plot_signal_samples = True
     plot_projection = True
     show_plot = True
 
     # Set parameters for visualization of scores across diffusion time.
-    num_steps = 200
+    num_steps_plt = 200
     min_diffusion_time_plt = 1e-2
     ax_bound = 2
     ax_pts = 20
@@ -88,12 +101,12 @@ if __name__ == "__main__":
     ## Score model setup
     marginal_prob_std_fn = functools.partial(
         marginal_prob_std, 
-        sigma=model_sigma, 
+        sigma=diffusion_sigma, 
         device=device,
     )
     diffusion_coeff_fn = functools.partial(
         diffusion_coeff, 
-        sigma=model_sigma, 
+        sigma=diffusion_sigma, 
         device=device,
     )
 
@@ -113,7 +126,7 @@ if __name__ == "__main__":
             f"lay{hidden_layers}",
             f"hid{hidden_dim}",
             f"emb{embed_dim}",
-            f"sigma{model_sigma}",
+            f"sigma{diffusion_sigma}",
             f"{signal_sampler_type}{signal_scale}",
         ))
         PATH = PATH + model_path_name + "/"
@@ -131,19 +144,31 @@ if __name__ == "__main__":
             raise NotImplementedError
         scoremodel.load_state_dict(torch.load(PATH+"weights_dict.pth", weights_only=True))
         scoremodel.eval()
-        signal_true = signal_sampler(do_random_shifts=False).squeeze(0)
-        signal_samples = signal_sampler(num=diffusion_samples, do_random_shifts=True)
     elif scoremodel_type == "gaussian":
-        scoremodel = GaussianDiffusionModel(mean_vec, marginal_prob_std_fn).to(device)
-        signal_true = mean_vec
-        signal_samples = mean_vec.unsqueeze(0)
+        scoremodel = GaussianDiffusionModel(
+            mean_vec=mean_vec, 
+            prior_sigma=prior_sigma,
+            marginal_prob_std=marginal_prob_std_fn,
+        ).to(device)
+        signal_sampler = samplers.GaussianSampler(
+            sigma=prior_sigma, 
+            signal=mean_vec, 
+            length=length, 
+            device=device,
+        )
     else: 
         raise NotImplementedError
     
     ## Generate signal samples from the true prior.
-    
+    signal_samples = signal_sampler(num=diffusion_samples, do_random_shifts=True).squeeze(0)
 
-    ## True signal is circulated and statistics are derived.
+    ## Set the true signal for MRA purposes.
+    if use_random_true_signal:
+        signal_true = signal_sampler(do_random_shifts=False).squeeze(0)
+    else:
+        signal_true = signal_true
+
+    ## True signal is circulated and MRA statistics are derived.
     circulant_true = circulant(signal_true, dim=0)
     power_spectrum_true = torch.abs(fft(signal_true, norm='ortho')).square()
 
@@ -169,7 +194,7 @@ if __name__ == "__main__":
     else:
         conditioner = functools.partial(
             experimental_conditioner,
-            diffusion_coeff=diffusion_coeff_fn,
+            marginal_prob_std=marginal_prob_std_fn,
             rho_est=power_spectrum_est,
             M=M,
             MRA_sigma=MRA_sigma,
@@ -177,6 +202,7 @@ if __name__ == "__main__":
             use_CLT=use_CLT,
             device=device,
         )
+
 
     ## Generate diffusion samples
     model_samples = model_sampler(
@@ -192,18 +218,37 @@ if __name__ == "__main__":
         device=device,
     )
 
+
     ## Print metrics
+
+    # print(model_samples.std().item())
+
     outputs_power_spectrum_rmsd = (
         torch.abs(fft(model_samples, norm='ortho')).square() - power_spectrum_true
     ).square().mean(dim=-1).sqrt()
 
-    print(f"Average RMSD between sample power spectra and the true power spectrum is: {outputs_power_spectrum_rmsd.mean().item():.2f}")
+    print(
+        "Average RMSD between sample power spectra and the true power spectrum is: ", 
+        f"{outputs_power_spectrum_rmsd.mean().item():.2f}",
+    )
 
     outputs_rmsd = (
         model_samples.unsqueeze(1) - circulant_true
     ).square().mean(dim=-1).sqrt().min(dim=-1)[0]
 
-    print(f"Average RMSD between model samples and the true signal is: {outputs_rmsd.mean().item():.2f}")
+    print(
+        "Average RMSD between model samples and the true signal is: ", 
+        f"{outputs_rmsd.mean().item():.2f}",
+    )
+
+    outputs_mean_signs = torch.sign(model_samples.mean(dim=-1))
+    pos_perc_model = 100. * (torch.sum(outputs_mean_signs + 1) // 2) / diffusion_samples
+    signal_mean_signs = torch.sign(signal_samples.mean(dim=-1))
+    pos_perc_signal = 100. * (torch.sum(signal_mean_signs + 1) // 2) / diffusion_samples
+
+    print(f"Percentage of positive means among model samples: {pos_perc_model:.2f}%")
+    print(f"Percentage of positive means among signal samples: {pos_perc_signal:.2f}%")
+
 
     ## Visualization
     plane_mag = signal_true.mean().item()
@@ -220,9 +265,9 @@ if __name__ == "__main__":
             marker = 'x',
         )
         ax.scatter(
-            model_samples[:,0].to('cpu'), 
-            model_samples[:,1].to('cpu'), 
-            model_samples[:,2].to('cpu'), 
+            model_samples[:, 0].to('cpu'), 
+            model_samples[:, 1].to('cpu'), 
+            model_samples[:, 2].to('cpu'), 
             c='b',
             marker='.',
             label='Model samples',
@@ -285,9 +330,9 @@ if __name__ == "__main__":
             marker = 'x',
         )
         ax.scatter(
-            signal_samples[:,0].to('cpu'), 
-            signal_samples[:,1].to('cpu'), 
-            signal_samples[:,2].to('cpu'), 
+            signal_samples[:, 0].to('cpu'), 
+            signal_samples[:, 1].to('cpu'), 
+            signal_samples[:, 2].to('cpu'), 
             c='g',
             marker='.',
             label='Signal samples',
@@ -326,25 +371,25 @@ if __name__ == "__main__":
             marker = 'x',
         )
         ax.scatter(
-            signal_samples[:,0].to('cpu'), 
-            signal_samples[:,1].to('cpu'), 
-            signal_samples[:,2].to('cpu'), 
+            signal_samples[:, 0].to('cpu'), 
+            signal_samples[:, 1].to('cpu'), 
+            signal_samples[:, 2].to('cpu'), 
             c='g', 
             marker='.',
             label='Signal samples',
         )
         ax.scatter(
-            model_samples[:,0].to('cpu'), 
-            model_samples[:,1].to('cpu'), 
-            model_samples[:,2].to('cpu'), 
+            model_samples[:, 0].to('cpu'), 
+            model_samples[:, 1].to('cpu'), 
+            model_samples[:, 2].to('cpu'), 
             c='b', 
             marker='.',
             label='Model samples',
         )
         ax.scatter(
-            signal_true[0].to('cpu'), 
-            signal_true[1].to('cpu'), 
-            signal_true[2].to('cpu'), 
+            circulant_true[:, 0].to('cpu'), 
+            circulant_true[:, 1].to('cpu'), 
+            circulant_true[:, 2].to('cpu'), 
             c='r',
             marker='*',
             linewidth=4.,
@@ -352,28 +397,31 @@ if __name__ == "__main__":
         )
         theta = np.linspace(0, 2 * np.pi, 100)
         radius = torch.norm(signal_true - signal_true.mean()).item()
-        phi = -np.pi/4
-        xyz = np.stack(
-            [
-                radius * np.sin(theta) * np.cos(phi),
-                radius * np.sin(theta) * np.sin(phi),
-                radius * np.cos(theta),
-            ],
-            axis=0,
-        ) # Start with a circle around the x-axis (theta), rotate to circle around [1, 1, 0] (phi).
-        rotmat = np.array(
-            [
-                [0.9082704, -0.0917296, -0.4082040],
-                [-0.0917296, 0.9082704, -0.4082040],
-                [0.4082040, 0.4082040, 0.8165408],
-            ]
-        ) # Rotation by 35.26 degrees to go from circle around [1, 1, 0] to circle around [1, 1, 1].
-        xyz = rotmat @ xyz
-        xyz1 = xyz + signal_true[0:3].mean().item()
-        xyz2 = xyz - signal_true[0:3].mean().item()
-        ax.plot(xyz1[0, ...], xyz1[1, ...], xyz1[2, ...], c='red', linestyle='dotted', linewidth=1.5)
-        ax.plot(xyz2[0, ...], xyz2[1, ...], xyz2[2, ...], c='red', linestyle='dotted', linewidth=1.5)
-        ax.legend(['Origin', 'Signal samples', 'Model samples', 'True signal', 'Phase manifold'])
+        if radius > 1e-5:
+            phi = -np.pi/4
+            xyz = np.stack(
+                [
+                    radius * np.sin(theta) * np.cos(phi),
+                    radius * np.sin(theta) * np.sin(phi),
+                    radius * np.cos(theta),
+                ],
+                axis=0,
+            ) # Start with a circle around the x-axis (theta), rotate to circle around [1, 1, 0] (phi).
+            rotmat = np.array(
+                [
+                    [0.9082704, -0.0917296, -0.4082040],
+                    [-0.0917296, 0.9082704, -0.4082040],
+                    [0.4082040, 0.4082040, 0.8165408],
+                ]
+            ) # Rotation by 35.26 degrees to go from circle around [1, 1, 0] to circle around [1, 1, 1].
+            xyz = rotmat @ xyz
+            xyz1 = xyz + signal_true[0:3].mean().item()
+            xyz2 = xyz - signal_true[0:3].mean().item()
+            ax.plot(xyz1[0, ...], xyz1[1, ...], xyz1[2, ...], c='red', linestyle='dotted', linewidth=1.5)
+            ax.plot(xyz2[0, ...], xyz2[1, ...], xyz2[2, ...], c='red', linestyle='dotted', linewidth=1.5)
+            ax.legend(['Origin', 'Signal samples', 'Model samples', 'True signal', 'Phase manifold'])
+        else: 
+            ax.legend(['Origin', 'Signal samples', 'Model samples', 'True signal'])
         ax.set_aspect('equal')
         ax.set_xlabel("x")
         ax.set_ylabel("y")
@@ -508,12 +556,12 @@ if __name__ == "__main__":
     #     Q.set_UVC(U_n,V_n)
     #     return Q
 
-    # timesteps = torch.linspace(1., min_diffusion_time_plt, num_steps)
+    # timesteps = torch.linspace(1., min_diffusion_time_plt, num_steps_plt)
     # anim = animation.FuncAnimation(
     #     fig, 
     #     update_quiver, 
     #     fargs=(timesteps, Q, XY[:, :, 0], XY[:, :, 1], F), 
-    #     frames=num_steps, 
+    #     frames=num_steps_plt, 
     #     interval=100,
     #     blit=False,
     # )
