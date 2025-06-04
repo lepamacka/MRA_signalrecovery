@@ -50,7 +50,7 @@ if __name__ == "__main__":
     print(f"Current device is \'{device}\'.")
 
     ### Set parameters for MRA
-    M = 100000000
+    M = 10000000
     sigma = 10.
 
     ### Set parameters for true signal
@@ -63,7 +63,7 @@ if __name__ == "__main__":
 
     ### Set parameters for conditioner
     conditioner_type = "triple_correlation" # "power_spectrum", "triple_correlation"
-    use_random_statistic = False
+    use_random_statistic = True
     use_CLT = True
     use_none_cond = False
 
@@ -86,14 +86,15 @@ if __name__ == "__main__":
 
     ### Set parameters for Langevin sampling
     num_steps = 100000
-    num_samples = 2 ** 6
-    eps = 1e-7
+    num_samples = 2 ** 8
+    eps = 1e-6
 
     ### Set parameters for plotting
     plot_output_only = False
-    plot_input = False
+    plot_input = True
     plot_MRA_samples = False
     plot_projection = False
+    show_plot = True
 
     ### Set parameters for visualization of scores
     ax_bound = 0.8
@@ -111,11 +112,11 @@ if __name__ == "__main__":
         length=length, 
         device=device,
     )
-    samples = MRA_sampler(num=M, do_random_shifts=True)
+    MRA_samples = MRA_sampler(num=M, do_random_shifts=True)
     if use_random_statistic:
-        sample_power_spectrum = torch.abs(fft(samples, norm='ortho')).square().mean(dim=0)
-        sample_triple_corr = compute_triple_corr(samples, average=True, device=device)
-        print(sample_triple_corr)
+        sample_power_spectrum = torch.abs(fft(MRA_samples, norm='ortho')).square().mean(dim=0)
+        sample_triple_corr = compute_triple_corr(MRA_samples, average=True, device=device)
+        # print(sample_triple_corr)
     else:
         sample_power_spectrum = power_spectrum_true + sigma ** 2
         sample_triple_corr = torch.zeros(size=(3, 3), device=device)
@@ -219,7 +220,7 @@ if __name__ == "__main__":
 
 
     ## Plot results
-    samples = samples.detach().to('cpu')
+    MRA_samples = MRA_samples.detach().to('cpu')
     input = input.detach().to('cpu')
     output = output.detach().to('cpu')
     signal_true = signal_true.detach().to('cpu')
@@ -244,9 +245,9 @@ if __name__ == "__main__":
             linewidth=4.,
         )
         ax.scatter(
-            samples[:, 0], 
-            samples[:, 1], 
-            samples[:, 2], 
+            MRA_samples[:, 0], 
+            MRA_samples[:, 1], 
+            MRA_samples[:, 2], 
             c='cornflowerblue',
             marker='.',
         )
@@ -425,6 +426,7 @@ if __name__ == "__main__":
             fig2.tight_layout()
             plt.savefig(f'./../figs/scorematching/{conditioner_type}/conditionalscores.png')
 
-    # plt.show()
+    if show_plot:
+        plt.show()
 
 

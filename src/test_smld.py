@@ -82,7 +82,7 @@ if __name__ == "__main__":
 
     # Diffusion sampler parameters
     model_sampler = Euler_Maruyama_sampler
-    diffusion_steps = 10000
+    diffusion_steps = 100000
     diffusion_samples = 2**8
     diffusion_epsilon = 1e-7
 
