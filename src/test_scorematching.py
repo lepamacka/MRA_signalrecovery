@@ -20,6 +20,7 @@ class GaussianScoreModel(torch.nn.Module):
         self, 
         mean: TensorType["L"],
         covar_mat: TensorType["L", "L"], 
+        circulate=False,
     ):
         super().__init__()
 
@@ -33,16 +34,48 @@ class GaussianScoreModel(torch.nn.Module):
             "mean",
             mean,
         )
+        self.register_buffer(
+            "mean_circulant",
+            circulant(mean, dim=0),
+        )
+        self.circulate = circulate
     
     def forward(
         self, 
-        x: TensorType[..., "L"],
-    ) -> TensorType[..., "L"]:
-        return torch.einsum('ij, ...j -> ...i', self.prec_mat, self.mean - x)
+        x: TensorType["B", "L"],
+    ) -> TensorType["B", "L"]:
+        if self.circulate:
+            closest_idx = (
+                x.unsqueeze(1) - self.mean_circulant
+            ).square().sum(dim=2).sqrt().min(dim=1)[1]
+            res = torch.einsum(
+                'ij, ...j -> ...i', 
+                self.prec_mat, 
+                self.mean_circulant[closest_idx, :] - x,
+            )
+        else:
+            res = torch.einsum(
+                'ij, ...j -> ...i', 
+                self.prec_mat, 
+                self.mean - x,
+            )
+        return res
+
+def align(input, reference):        
+    input_circulant = circulant(input, dim=-1)
+    best_shift_idx = (
+        reference.unsqueeze(0) - input_circulant
+    ).square().sum(dim=-1).min(dim=-1)[1]
+    if input.ndim == 1:
+        return input_circulant[best_shift_idx, :]
+    elif input.ndim == 2:
+        return input_circulant[torch.arange(input.shape[0]), best_shift_idx, :]
+    else: 
+        raise ValueError(f"{input.ndim = }, which is greater than 2.")
 
 if __name__ == "__main__":
     
-    ## Set parameters
+    #### Set parameters
 
     ### Set pytorch parameters
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -50,62 +83,58 @@ if __name__ == "__main__":
     print(f"Current device is \'{device}\'.")
 
     ### Set parameters for MRA
-    M = 10000000
-    sigma = 10.
+    M = 10000
+    sigma = 1.
 
     ### Set parameters for true signal
-    length = 3
+    length = 41
     signal_true = torch.zeros((length,), device=device, requires_grad=False)
-    signal_true[0] = 1.
+    signal_true[0] = np.sqrt(41)
 
     # signal_true = 1. * torch.ones((length,), device=device, requires_grad=False)
     # signal_true += 0.5 * torch.randn_like(signal_true)
 
     ### Set parameters for conditioner
-    conditioner_type = "triple_correlation" # "power_spectrum", "triple_correlation"
-    use_random_statistic = True
+    conditioner_type = "power_spectrum" # "power_spectrum", "triple_correlation"
+    use_random_statistic = False
     use_CLT = True
-    use_none_cond = False
+    use_none_cond = True
 
     ### Set parameters for score model
-    scoremodel_type = "none" # "gaussian", "learned", "none"
+    scoremodel_type = "gaussian" # "gaussian", "learned", "none"
     
     ### Set parameters for gaussian score model
-    prior_mean = torch.zeros_like(signal_true)
-    prior_A = torch.eye(n=length, device=device)
-    # prior_mean = torch.tensor([0., 0., 0.], device=device)
-    # prior_A = torch.tensor([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], device=device)
-    # prior_mean = torch.tensor([2., 0., 0.], device=device)
-    # prior_A = 0.5 * torch.tensor([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], device=device)
-    # prior_mean = torch.tensor([6., 0., 0.], device=device)
-    # prior_A = torch.tensor([[3., 0., 0.], [0., 0.5, 0.], [0., 0., 0.5]], device=device)
+    use_circulate = True
+    prior_mean = signal_true
+    prior_A = 1.*torch.eye(n=length, device=device)
+    # prior_mean = torch.tensor([1., 0., 0.], device=device)
+    # prior_A = 0.1*torch.tensor([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], device=device)
 
     ### Set parameters for learned score model
     PATH = None # If None it will try to find a compatible model.
     hiddendim = 8
 
     ### Set parameters for Langevin sampling
-    num_steps = 100000
+    num_steps = 10000
     num_samples = 2 ** 8
-    eps = 1e-6
+    eps = 1e-4
 
     ### Set parameters for plotting
     plot_output_only = False
-    plot_input = True
+    plot_input = False
     plot_MRA_samples = False
     plot_projection = False
-    show_plot = True
+    show_plot = False
 
     ### Set parameters for visualization of scores
     ax_bound = 0.8
     ax_pts = 20
     plane_mag = signal_true.mean().item()
 
-    ## Conditioner
+    #### Conditioner setup.
     circulant_true = circulant(signal_true, dim=0)
     power_spectrum_true = torch.abs(fft(signal_true, norm='ortho')).square()
-    triple_corr_true = compute_triple_corr(signal_true, device=device)
-
+    
     MRA_sampler = GaussianSampler(
         sigma=sigma, 
         signal=signal_true, 
@@ -115,21 +144,25 @@ if __name__ == "__main__":
     MRA_samples = MRA_sampler(num=M, do_random_shifts=True)
     if use_random_statistic:
         sample_power_spectrum = torch.abs(fft(MRA_samples, norm='ortho')).square().mean(dim=0)
-        sample_triple_corr = compute_triple_corr(MRA_samples, average=True, device=device)
-        # print(sample_triple_corr)
+        if length == 3:
+            sample_triple_corr = compute_triple_corr(MRA_samples, average=True, device=device)
+            # print(sample_triple_corr)
     else:
         sample_power_spectrum = power_spectrum_true + sigma ** 2
-        sample_triple_corr = torch.zeros(size=(3, 3), device=device)
-        sample_triple_corr[0, 0] += 1.
-        sample_triple_corr[0, :] += 1.
-        sample_triple_corr[:, 0] += 1.
-        sample_triple_corr[1, 2] += 1.
-        sample_triple_corr[2, 1] += 1.
-        sample_triple_corr *= sigma ** 2 * torch.mean(signal_true)
-        sample_triple_corr += triple_corr_true
+        if length == 3:
+            triple_corr_true = compute_triple_corr(signal_true, device=device)
+            sample_triple_corr = torch.zeros(size=(3, 3), device=device)
+            sample_triple_corr[0, 0] += 1.
+            sample_triple_corr[0, :] += 1.
+            sample_triple_corr[:, 0] += 1.
+            sample_triple_corr[1, 2] += 1.
+            sample_triple_corr[2, 1] += 1.
+            sample_triple_corr *= sigma ** 2 * torch.mean(signal_true)
+            sample_triple_corr += triple_corr_true
 
     if use_none_cond:
         conditioner = None
+        conditioner_type = "no_conditioner"
     elif conditioner_type == "power_spectrum":
         conditioner = functools.partial(
             pwrspec_score,
@@ -155,10 +188,10 @@ if __name__ == "__main__":
         raise NotImplementedError
     
 
-    ## Score model
+    #### Score model setup.
     if scoremodel_type == "gaussian":
         covar_mat = torch.einsum('ij, kj -> ik', prior_A, prior_A)
-        scoremodel = GaussianScoreModel(prior_mean, covar_mat).to(device)
+        scoremodel = GaussianScoreModel(prior_mean, covar_mat, use_circulate).to(device)
     elif scoremodel_type == "learned":
         if PATH is None:
             PATH = f"./../model_weights/scorematching/MRA_convscoremodel_length{length}_hiddim{hiddendim}/"
@@ -175,7 +208,7 @@ if __name__ == "__main__":
         raise ValueError("Unimplemented scoremodel_type")
 
 
-    ## Generate input samples
+    #### Generate input samples
     input = torch.randn(
         size=(num_samples, signal_true.shape[-1]), 
         device=device,
@@ -192,7 +225,7 @@ if __name__ == "__main__":
     # )
     # input = input_sampler(num=num_samples, do_random_shifts=True)
 
-    ## Run Langevin sampling
+    #### Run Langevin sampling
     output = Langevin_sampler(
         input=input,
         scoremodel=scoremodel,
@@ -205,65 +238,105 @@ if __name__ == "__main__":
     if torch.any(torch.isfinite(output.reshape((-1))).logical_not()):
         print("Some of the output is nan or inf.")
 
-    ## Print comparison of input and output
-    inputs_power_spectrum_rmsd = (torch.abs(fft(input, norm='ortho')).square() - power_spectrum_true).square().mean(dim=-1).sqrt()
-    outputs_power_spectrum_rmsd = (torch.abs(fft(output, norm='ortho')).square() - power_spectrum_true).square().mean(dim=-1).sqrt()
 
-    print(f"Average RMSD between input power spectra and the true power spectrum is: {inputs_power_spectrum_rmsd.mean().item():.2f}")
-    print(f"Average RMSD between output power spectra and the true power spectrum is: {outputs_power_spectrum_rmsd.mean().item():.2f}")
+    #### Compute and print comparison of input and output
 
-    inputs_rmsd = (input.unsqueeze(1) - circulant_true).square().mean(dim=-1).sqrt().min(dim=-1)[0]
-    outputs_rmsd = (output.unsqueeze(1) - circulant_true).square().mean(dim=-1).sqrt().min(dim=-1)[0]
+    ### Average RMSD to true power spectrum.
+    input_power_spectra = torch.abs(fft(input, norm='ortho')).square()
+    output_power_spectra = torch.abs(fft(output, norm='ortho')).square()
+    inputs_power_spectra_rmsd = (
+        input_power_spectra - power_spectrum_true
+    ).square().mean(dim=1).sqrt()
+    outputs_power_spectra_rmsd = (
+        output_power_spectra - power_spectrum_true
+    ).square().mean(dim=1).sqrt()
 
-    print(f"Average RMSD between input samples and the true signal is: {inputs_rmsd.mean().item():.2f}")
-    print(f"Average RMSD between output samples and the true signal is: {outputs_rmsd.mean().item():.2f}")
+    print(
+        " Average RMSD between input power spectra and the true power spectrum is:  ", 
+        f"{inputs_power_spectra_rmsd.mean().item():.2f}\n",
+        "Average RMSD between output power spectra and the true power spectrum is: ", 
+        f"{outputs_power_spectra_rmsd.mean().item():.2f}"
+    )
+
+    ### Average generalized RMSD to true signal.
+    inputs_rmsd = (input.unsqueeze(1) - circulant_true.unsqueeze(0)).square().mean(dim=2).sqrt().min(dim=1)[0]
+    outputs_rmsd = (output.unsqueeze(1) - circulant_true.unsqueeze(0)).square().mean(dim=2).sqrt().min(dim=1)[0]
+
+    print(
+        " Average RMSD between input samples and the true signal is:  ", 
+        f"{inputs_rmsd.mean().item():.2f}\n",
+        "Average RMSD between output samples and the true signal is: ", 
+        f"{outputs_rmsd.mean().item():.2f}",
+    )
+
+    ### Find the output sample that minimizes generalized RMSD.
+    output_circulant = circulant(output, dim=-1)
+    best_output_idx = (
+        output.unsqueeze(0).unsqueeze(2) - output_circulant.unsqueeze(1)
+    ).square().sum(dim=3).min(dim=2)[0].sum(dim=1).min(dim=0)[1]
+    best_output = output[best_output_idx, :]
+
+    print(
+        " The best output sample centroid wrt RMSD is: (", 
+        ", ".join([f"{x.item():5.2f}" for x in best_output]),
+        ")\n",
+        "For reference, the aligned true signal is:   (",
+        ", ".join([f"{x.item():5.2f}" for x in align(signal_true, best_output)]),
+        ")",
+    )
+
+    aligned_output = align(output, signal_true)
+    aligned_output_est = align(output, best_output)
 
 
-    ## Plot results
+    #### Plot results
     MRA_samples = MRA_samples.detach().to('cpu')
     input = input.detach().to('cpu')
     output = output.detach().to('cpu')
     signal_true = signal_true.detach().to('cpu')
     circulant_true = circulant_true.detach().to('cpu')
+    power_spectrum_true = power_spectrum_true.detach().to('cpu')
+    best_output = best_output.detach().to('cpu')
+    aligned_output = aligned_output.detach().to('cpu')
+    output_power_spectra = output_power_spectra.detach().to('cpu')
 
-    if plot_MRA_samples and signal_true.shape[0] >= 3:
-        fig = plt.figure()
-        ax = fig.add_subplot(projection='3d')
-        ax.scatter(
-            [0.],
-            [0.],
-            [0.],
-            c='black',
-            marker = 'x',
-        )
-        ax.scatter(
-            circulant_true[0:3, 0], 
-            circulant_true[0:3, 1], 
-            circulant_true[0:3, 2], 
-            c='red',
-            marker='*',
-            linewidth=4.,
-        )
-        ax.scatter(
-            MRA_samples[:, 0], 
-            MRA_samples[:, 1], 
-            MRA_samples[:, 2], 
-            c='cornflowerblue',
-            marker='.',
-        )
-        ax.legend(["Origin", "True Signal", "MRA Samples"])  
-        ax.set_aspect('equal')
-        ax.set_xlabel("x")
-        ax.set_ylabel("y")
-        ax.set_zlabel("z")
+    if signal_true.shape[0] == 3:
+        if plot_MRA_samples:
+            figmra = plt.figure()
+            axmra = fig.add_subplot(projection='3d')
+            axmra.scatter(
+                [0.],
+                [0.],
+                [0.],
+                c='black',
+                marker = 'x',
+            )
+            axmra.scatter(
+                circulant_true[0:3, 0], 
+                circulant_true[0:3, 1], 
+                circulant_true[0:3, 2], 
+                c='red',
+                marker='*',
+                linewidth=4.,
+            )
+            axmra.scatter(
+                MRA_samples[:, 0], 
+                MRA_samples[:, 1], 
+                MRA_samples[:, 2], 
+                c='cornflowerblue',
+                marker='.',
+            )
+            axmra.legend(["Origin", "True Signal", "MRA Samples"])  
+            axmra.set_aspect('equal')
+            axmra.set_xlabel("x")
+            axmra.set_ylabel("y")
+            axmra.set_zlabel("z")
 
-        ax.view_init(elev=35, azim=-45, roll=0)
+            axmra.view_init(elev=35, azim=-45, roll=0)
 
-        # plt.savefig(f"./../figs/scorematching/{conditioner_type}/MRA_samples.svg")
-        # plt.savefig(f"./../figs/scorematching/{conditioner_type}/MRA_samples.png")
+            plt.savefig(f"./../figs/scorematching/{conditioner_type}/MRA_samples.svg")
+            plt.savefig(f"./../figs/scorematching/{conditioner_type}/MRA_samples.png")
 
-        plt.show()
-    elif signal_true.shape[0] >= 3:
         fig = plt.figure()
         ax = fig.add_subplot(projection='3d')
         ax.scatter(
@@ -357,74 +430,113 @@ if __name__ == "__main__":
         plt.savefig(f"./../figs/scorematching/{conditioner_type}/fig2.png")
         plt.savefig(f"./../figs/scorematching/{conditioner_type}/fig2.svg")
 
+        if plot_projection:
+            if not scoremodel is None:
+                S1, XY1, P1 = score_projector(
+                    t_diff=0,
+                    scoremodel=scoremodel, 
+                    conditioner=None,
+                    plane_mag=plane_mag, 
+                    ax_bound=ax_bound,
+                    ax_pts=ax_pts,
+                    device=device,
+                )
+                XY1 = XY1.to('cpu')
+                S1 = S1.to('cpu')
+
+                fig1, ax1 = plt.subplots()
+                Q1 = ax1.quiver(
+                    XY1[:, :, 0], 
+                    XY1[:, :, 1], 
+                    S1[:, :, 0], 
+                    S1[:, :, 1],
+                )
+                ax1.set_aspect('equal', 'box')
+                centers = plt.scatter(
+                    (P1 @ circulant(signal_true[:3], 0)).to('cpu')[0, :], 
+                    (P1 @ circulant(signal_true[:3], 0)).to('cpu')[1, :],
+                ) 
+
+                plt.title(f"Projection of 3D-scores")
+                fig1.tight_layout()
+                plt.savefig(f'./../figs/scorematching/{conditioner_type}/unconditionalscores.png')
+
+            if not use_none_cond:
+                S2, XY2, P2 = score_projector(
+                    t_diff=0,
+                    scoremodel=scoremodel, 
+                    conditioner=conditioner,
+                    plane_mag=plane_mag, 
+                    ax_bound=ax_bound,
+                    ax_pts=ax_pts,
+                    device=device,
+                )
+                XY2 = XY2.to('cpu')
+                S2 = S2.to('cpu')
+
+                fig2, ax2 = plt.subplots()
+
+                Q2 = ax2.quiver(
+                    XY2[:, :, 0], 
+                    XY2[:, :, 1], 
+                    S2[:, :, 0], 
+                    S2[:, :, 1],
+                )
+                ax2.set_aspect('equal', 'box')
+                centers = plt.scatter(
+                    (P2 @ circulant(signal_true[:3], 0)).to('cpu')[0, :], 
+                    (P2 @ circulant(signal_true[:3], 0)).to('cpu')[1, :],
+                ) 
+
+                plt.title(f"Projection of conditional 3D-scores")
+                fig2.tight_layout()
+                plt.savefig(f'./../figs/scorematching/{conditioner_type}/conditionalscores.png')
     elif signal_true.shape[0] == 1:
         fig, ax = plt.subplots(1, 2, sharey=True, tight_layout=True)
         ax[0].hist(input)
         ax[1].hist(output)
         ax[0].plot(signal_true, 0*signal_true, 'd')
         ax[1].plot(signal_true, 0*signal_true, 'd')
+    elif signal_true.shape[0] > 3:
+        # stds = torch.std(signal_true.unsqueeze(0) - aligned_output, dim=0)
+        # fig1, ax1 = plt.subplots()
+        # ax1.bar(torch.arange(length), signal_true, yerr=stds)
+        # plt.title("True signal with empirical standard deviation per channel")
+        # plt.savefig(f'./../figs/scorematching/{conditioner_type}/bardiagram_{length=}.png')
 
-    if signal_true.shape[0] == 3 and plot_projection:
-        if not scoremodel is None:
-            S1, XY1, P1 = score_projector(
-                t_diff=0,
-                scoremodel=scoremodel, 
-                conditioner=None,
-                plane_mag=plane_mag, 
-                ax_bound=ax_bound,
-                ax_pts=ax_pts,
-                device=device,
-            )
-            XY1 = XY1.to('cpu')
-            S1 = S1.to('cpu')
+        fig2, ax2 = plt.subplots()
+        ax2.boxplot(aligned_output, positions=range(length), label="Median Output Sample")
+        ax2.scatter(
+            range(length), 
+            signal_true, 
+            c='r', 
+            marker='*', 
+            linewidth=5., 
+            label="True Signal",
+        )
+        ax2.legend()
+        ax2.xaxis.set_ticklabels([])
+        plt.title("Box plot of output samples aligned with the true signal.")
+        plt.savefig(f'./../figs/scorematching/{conditioner_type}/boxplot_samples_{length=}.png')
 
-            fig1, ax1 = plt.subplots()
-            Q1 = ax1.quiver(
-                XY1[:, :, 0], 
-                XY1[:, :, 1], 
-                S1[:, :, 0], 
-                S1[:, :, 1],
-            )
-            ax1.set_aspect('equal', 'box')
-            centers = plt.scatter(
-                (P1 @ circulant(signal_true[:3], 0)).to('cpu')[0, :], 
-                (P1 @ circulant(signal_true[:3], 0)).to('cpu')[1, :],
-            ) 
-
-            plt.title(f"Projection of 3D-scores")
-            fig1.tight_layout()
-            plt.savefig(f'./../figs/scorematching/{conditioner_type}/unconditionalscores.png')
-
-        if not use_none_cond:
-            S2, XY2, P2 = score_projector(
-                t_diff=0,
-                scoremodel=scoremodel, 
-                conditioner=conditioner,
-                plane_mag=plane_mag, 
-                ax_bound=ax_bound,
-                ax_pts=ax_pts,
-                device=device,
-            )
-            XY2 = XY2.to('cpu')
-            S2 = S2.to('cpu')
-
-            fig2, ax2 = plt.subplots()
-
-            Q2 = ax2.quiver(
-                XY2[:, :, 0], 
-                XY2[:, :, 1], 
-                S2[:, :, 0], 
-                S2[:, :, 1],
-            )
-            ax2.set_aspect('equal', 'box')
-            centers = plt.scatter(
-                (P2 @ circulant(signal_true[:3], 0)).to('cpu')[0, :], 
-                (P2 @ circulant(signal_true[:3], 0)).to('cpu')[1, :],
-            ) 
-
-            plt.title(f"Projection of conditional 3D-scores")
-            fig2.tight_layout()
-            plt.savefig(f'./../figs/scorematching/{conditioner_type}/conditionalscores.png')
+        fig3, ax3 = plt.subplots()
+        ax3.boxplot(
+            output_power_spectra[:, :(length+1)//2], 
+            positions=range((length+1)//2), 
+            label="Median Power Spectrum",
+        )
+        ax3.scatter(
+            range((length+1)//2), 
+            power_spectrum_true[:(length+1)//2], 
+            c='r', 
+            marker='*', 
+            linewidth=5., 
+            label="True Power Spectrum",
+        )
+        ax3.legend()
+        plt.title("Box plot of output power spectra aligned with the true power spectrum.")
+        plt.savefig(f'./../figs/scorematching/{conditioner_type}/boxplot_pwrspec_{length=}.png')
+        
 
     if show_plot:
         plt.show()
