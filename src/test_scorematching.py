@@ -96,9 +96,9 @@ if __name__ == "__main__":
 
     ### Set parameters for conditioner
     conditioner_type = "power_spectrum" # "power_spectrum", "triple_correlation"
-    use_random_statistic = False
+    use_random_statistics = False
     use_CLT = True
-    use_none_cond = True
+    use_none_cond = False
 
     ### Set parameters for score model
     scoremodel_type = "gaussian" # "gaussian", "learned", "none"
@@ -142,7 +142,7 @@ if __name__ == "__main__":
         device=device,
     )
     MRA_samples = MRA_sampler(num=M, do_random_shifts=True)
-    if use_random_statistic:
+    if use_random_statistics:
         sample_power_spectrum = torch.abs(fft(MRA_samples, norm='ortho')).square().mean(dim=0)
         if length == 3:
             sample_triple_corr = compute_triple_corr(MRA_samples, average=True, device=device)
@@ -303,7 +303,7 @@ if __name__ == "__main__":
     if signal_true.shape[0] == 3:
         if plot_MRA_samples:
             figmra = plt.figure()
-            axmra = fig.add_subplot(projection='3d')
+            axmra = figmra.add_subplot(projection='3d')
             axmra.scatter(
                 [0.],
                 [0.],
@@ -491,13 +491,13 @@ if __name__ == "__main__":
                 plt.title(f"Projection of conditional 3D-scores")
                 fig2.tight_layout()
                 plt.savefig(f'./../figs/scorematching/{conditioner_type}/conditionalscores.png')
-    elif signal_true.shape[0] == 1:
+    if signal_true.shape[0] == 1:
         fig, ax = plt.subplots(1, 2, sharey=True, tight_layout=True)
         ax[0].hist(input)
         ax[1].hist(output)
         ax[0].plot(signal_true, 0*signal_true, 'd')
         ax[1].plot(signal_true, 0*signal_true, 'd')
-    elif signal_true.shape[0] > 3:
+    if signal_true.shape[0] >= 3:
         # stds = torch.std(signal_true.unsqueeze(0) - aligned_output, dim=0)
         # fig1, ax1 = plt.subplots()
         # ax1.bar(torch.arange(length), signal_true, yerr=stds)
@@ -505,7 +505,11 @@ if __name__ == "__main__":
         # plt.savefig(f'./../figs/scorematching/{conditioner_type}/bardiagram_{length=}.png')
 
         fig2, ax2 = plt.subplots()
-        ax2.boxplot(aligned_output, positions=range(length), label="Median Output Sample")
+        ax2.boxplot(
+            aligned_output, 
+            positions=range(length), 
+            label="Median Output Sample",
+        )
         ax2.scatter(
             range(length), 
             signal_true, 
@@ -516,9 +520,17 @@ if __name__ == "__main__":
         )
         ax2.legend()
         ax2.xaxis.set_ticklabels([])
-        plt.title("Box plot of output samples aligned with the true signal.")
-        plt.savefig(f'./../figs/scorematching/{conditioner_type}/boxplot_samples_{length=}.png')
-
+        if use_none_cond:
+            plt.title("Box plot of prior samples aligned with true signal.")
+            plt.savefig(f'./../figs/scorematching/{conditioner_type}/boxplot_samples_{length=}.png')
+        else:
+            if use_random_statistics:
+                plt.title("Box plot of posterior samples wrt population power spectrum aligned with true signal.")
+                plt.savefig(f'./../figs/scorematching/{conditioner_type}/boxplot_samples_{length=}_poppwrspec.png')
+            else:
+                plt.title("Box plot of posterior samples wrt true power spectrum aligned with true signal.")
+                plt.savefig(f'./../figs/scorematching/{conditioner_type}/boxplot_samples_{length=}_truepwrspec.png')
+        
         fig3, ax3 = plt.subplots()
         ax3.boxplot(
             output_power_spectra[:, :(length+1)//2], 
@@ -534,9 +546,16 @@ if __name__ == "__main__":
             label="True Power Spectrum",
         )
         ax3.legend()
-        plt.title("Box plot of output power spectra aligned with the true power spectrum.")
-        plt.savefig(f'./../figs/scorematching/{conditioner_type}/boxplot_pwrspec_{length=}.png')
-        
+        if use_none_cond:
+            plt.title("Box plot of prior sample power spectra.")
+            plt.savefig(f'./../figs/scorematching/{conditioner_type}/boxplot_pwrspec_{length=}.png')
+        else:
+            if use_random_statistics:
+                plt.title("Box plot of posterior sample power spectra wrt population power spectrum.")
+                plt.savefig(f'./../figs/scorematching/{conditioner_type}/boxplot_pwrspec_{length=}_poppwrspec.png')
+            else:
+                plt.title("Box plot of posterior sample power spectra wrt true power spectrum.")
+                plt.savefig(f'./../figs/scorematching/{conditioner_type}/boxplot_pwrspec_{length=}_truepwrspec.png')
 
     if show_plot:
         plt.show()
