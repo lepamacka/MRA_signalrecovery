@@ -83,30 +83,29 @@ if __name__ == "__main__":
     print(f"Current device is \'{device}\'.")
 
     ### Set parameters for MRA
-    M = 10000
+    M = 1000
     sigma = 1.
 
     ### Set parameters for true signal
     length = 41
     signal_true = torch.zeros((length,), device=device, requires_grad=False)
-    signal_true[0] = np.sqrt(41)
-
-    # signal_true = 1. * torch.ones((length,), device=device, requires_grad=False)
-    # signal_true += 0.5 * torch.randn_like(signal_true)
+    # signal_true[0] = np.sqrt(41)
+    # signal_true += 1.
+    signal_true += torch.randn_like(signal_true)
 
     ### Set parameters for conditioner
     conditioner_type = "power_spectrum" # "power_spectrum", "triple_correlation"
     use_random_statistics = False
-    use_CLT = True
+    use_CLT = False
     use_none_cond = False
 
     ### Set parameters for score model
-    scoremodel_type = "gaussian" # "gaussian", "learned", "none"
+    scoremodel_type = "none" # "gaussian", "learned", "none"
     
     ### Set parameters for gaussian score model
-    use_circulate = True
+    use_circulate = True # The circulate distribution is piecewise gaussian.
     prior_mean = signal_true
-    prior_A = 1.*torch.eye(n=length, device=device)
+    prior_A = 1. * torch.eye(n=length, device=device)
     # prior_mean = torch.tensor([1., 0., 0.], device=device)
     # prior_A = 0.1*torch.tensor([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], device=device)
 
@@ -116,8 +115,8 @@ if __name__ == "__main__":
 
     ### Set parameters for Langevin sampling
     num_steps = 10000
-    num_samples = 2 ** 8
-    eps = 1e-4
+    num_samples = 2 ** 10
+    eps = 1e-3
 
     ### Set parameters for plotting
     plot_output_only = False
@@ -131,34 +130,36 @@ if __name__ == "__main__":
     ax_pts = 20
     plane_mag = signal_true.mean().item()
 
+
     #### Conditioner setup.
     circulant_true = circulant(signal_true, dim=0)
     power_spectrum_true = torch.abs(fft(signal_true, norm='ortho')).square()
     
-    MRA_sampler = GaussianSampler(
-        sigma=sigma, 
-        signal=signal_true, 
-        length=length, 
-        device=device,
-    )
-    MRA_samples = MRA_sampler(num=M, do_random_shifts=True)
-    if use_random_statistics:
-        sample_power_spectrum = torch.abs(fft(MRA_samples, norm='ortho')).square().mean(dim=0)
-        if length == 3:
-            sample_triple_corr = compute_triple_corr(MRA_samples, average=True, device=device)
-            # print(sample_triple_corr)
-    else:
-        sample_power_spectrum = power_spectrum_true + sigma ** 2
-        if length == 3:
-            triple_corr_true = compute_triple_corr(signal_true, device=device)
-            sample_triple_corr = torch.zeros(size=(3, 3), device=device)
-            sample_triple_corr[0, 0] += 1.
-            sample_triple_corr[0, :] += 1.
-            sample_triple_corr[:, 0] += 1.
-            sample_triple_corr[1, 2] += 1.
-            sample_triple_corr[2, 1] += 1.
-            sample_triple_corr *= sigma ** 2 * torch.mean(signal_true)
-            sample_triple_corr += triple_corr_true
+    if not use_none_cond:
+        MRA_sampler = GaussianSampler(
+            sigma=sigma, 
+            signal=signal_true, 
+            length=length, 
+            device=device,
+        )
+        MRA_samples = MRA_sampler(num=M, do_random_shifts=True)
+        if use_random_statistics:
+            sample_power_spectrum = torch.abs(fft(MRA_samples, norm='ortho')).square().mean(dim=0)
+            if length == 3:
+                sample_triple_corr = compute_triple_corr(MRA_samples, average=True, device=device)
+                # print(sample_triple_corr)
+        else:
+            sample_power_spectrum = power_spectrum_true + sigma ** 2
+            if length == 3:
+                triple_corr_true = compute_triple_corr(signal_true, device=device)
+                sample_triple_corr = torch.zeros(size=(3, 3), device=device)
+                sample_triple_corr[0, 0] += 1.
+                sample_triple_corr[0, :] += 1.
+                sample_triple_corr[:, 0] += 1.
+                sample_triple_corr[1, 2] += 1.
+                sample_triple_corr[2, 1] += 1.
+                sample_triple_corr *= sigma ** 2 * torch.mean(signal_true)
+                sample_triple_corr += triple_corr_true
 
     if use_none_cond:
         conditioner = None
@@ -209,7 +210,7 @@ if __name__ == "__main__":
 
 
     #### Generate input samples
-    input = torch.randn(
+    input = torch.norm(signal_true) * torch.randn(
         size=(num_samples, signal_true.shape[-1]), 
         device=device,
         requires_grad=False,
@@ -270,35 +271,36 @@ if __name__ == "__main__":
     )
 
     ### Find the output sample that minimizes generalized RMSD.
-    output_circulant = circulant(output, dim=-1)
-    best_output_idx = (
-        output.unsqueeze(0).unsqueeze(2) - output_circulant.unsqueeze(1)
-    ).square().sum(dim=3).min(dim=2)[0].sum(dim=1).min(dim=0)[1]
-    best_output = output[best_output_idx, :]
+    # output_circulant = circulant(output, dim=-1)
+    # best_output_idx = (
+    #     output.unsqueeze(0).unsqueeze(2) - output_circulant.unsqueeze(1)
+    # ).square().sum(dim=3).min(dim=2)[0].sum(dim=1).min(dim=0)[1]
+    # best_output = output[best_output_idx, :]
 
-    print(
-        " The best output sample centroid wrt RMSD is: (", 
-        ", ".join([f"{x.item():5.2f}" for x in best_output]),
-        ")\n",
-        "For reference, the aligned true signal is:   (",
-        ", ".join([f"{x.item():5.2f}" for x in align(signal_true, best_output)]),
-        ")",
-    )
-
+    # print(
+    #     " The best output sample centroid wrt RMSD is: (", 
+    #     ", ".join([f"{x.item():5.2f}" for x in best_output]),
+    #     ")\n",
+    #     "For reference, the aligned true signal is:   (",
+    #     ", ".join([f"{x.item():5.2f}" for x in align(signal_true, best_output)]),
+    #     ")",
+    # )
+    # aligned_output_est = align(output, best_output)
+    
     aligned_output = align(output, signal_true)
-    aligned_output_est = align(output, best_output)
 
 
     #### Plot results
-    MRA_samples = MRA_samples.detach().to('cpu')
     input = input.detach().to('cpu')
     output = output.detach().to('cpu')
     signal_true = signal_true.detach().to('cpu')
     circulant_true = circulant_true.detach().to('cpu')
     power_spectrum_true = power_spectrum_true.detach().to('cpu')
-    best_output = best_output.detach().to('cpu')
+    # best_output = best_output.detach().to('cpu')
     aligned_output = aligned_output.detach().to('cpu')
     output_power_spectra = output_power_spectra.detach().to('cpu')
+    if plot_MRA_samples:
+        MRA_samples = MRA_samples.detach().to('cpu')
 
     if signal_true.shape[0] == 3:
         if plot_MRA_samples:

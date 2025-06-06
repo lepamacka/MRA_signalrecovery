@@ -22,7 +22,7 @@ def pwrspec_score(
     k = 0
     while k < x_new.shape[-1]/2 or (k == x_new.shape[-1]//2 and x_new.shape[-1]%2 == 0):
         if CLT:
-            tmp = pwrspec_CLT_score_comps(x_new, x_tilde, rho_true, k, M, sigma, device=device)
+            tmp = pwrspec_score_comps_CLT(x_new, x_tilde, rho_true, k, M, sigma, device=device)
         else:
             tmp = pwrspec_score_comps(x_new, x_tilde, rho_true, k, M, sigma, device=device)
         score += tmp
@@ -61,22 +61,22 @@ def pwrspec_score_comps(
     res_cpu = np.inf * np.ones_like(div)
     res_cpu[div!=0.] = div_res * xi_k_cpu[div!=0.]
     res_tmp = torch.tensor(res_cpu, device=device)
-    res_tmp -= M * x_Psqr_k / (sigma ** 2)
-    res_tmp -= M / 2.
-    res_tmp += 1. / k_fac
+    res_tmp += 1. / k_fac - M / 2 - M * x_Psqr_k / (sigma ** 2)
     res_tmp *= k_fac / (2. * x_Psqr_k)
 
-    # Calculate approximated values of Bessel terms and replace these where appropriate
+    # Calculate approximated values of Bessel terms and replace where appropriate
     res = torch.zeros_like(res_tmp)
-    res += (M ** 2) * rho[k] / ((4 / k_fac) * (M + 2 / k_fac) * (sigma ** 4)) - M / ((2 / k_fac) * (sigma ** 2))
-    idxs = torch.all(torch.stack((xi_k / M >= 1., torch.isfinite(res_tmp))), dim=0)
+    res += (
+        ((M ** 2) / ((4 / k_fac) * (M + 2 / k_fac))) * rho[k] / (sigma ** 4) 
+        - (M / (2 / k_fac)) * 1. / (sigma ** 2)
+    )
+    idxs = torch.all(torch.stack((xi_k >= 0.1, torch.isfinite(res_tmp))), dim=0)
     res[idxs] = res_tmp[idxs]
 
-    # Multiply result by the gradient factor
-    out = res.unsqueeze(-1) * torch.einsum('ij, ...j -> ...i', sym_mat_k, x_new)
-    return out
+    # Multiply result by the gradient factor and return
+    return res.unsqueeze(-1) * torch.einsum('ij, ...j -> ...i', sym_mat_k, x_new)
 
-def pwrspec_CLT_score_comps(
+def pwrspec_score_comps_CLT(
         x_new: TensorType[..., "L"], 
         x_tilde: TensorType[..., "L"], 
         rho: TensorType["L"], 
@@ -97,12 +97,19 @@ def pwrspec_CLT_score_comps(
     sym_mat_k = (q_mat_k + torch.conj(q_mat_k).T).real
 
     # res = M * (rho[k] / (sigma ** 2) - (1. + x_Psqr_k / (sigma ** 2))) * (rho[k] / (sigma ** 2) + x_Psqr_k / (sigma ** 2)) / (2. * (1. + 2. * x_Psqr_k / (sigma ** 2))**2)
-    res = -1. * M * (x_Psqr_k * (sigma**2 + x_Psqr_k) + rho[k] * (sigma**2 - rho[k])) / (sigma**2 * (sigma**2 + 2. * x_Psqr_k)**2)
-    res /= k_fac
-    res += -1. / (2 * x_Psqr_k + sigma**2)
-    out = res.unsqueeze(-1) * torch.einsum('ij, ...j -> ...i', sym_mat_k, x_new)
+    
+    # res = -1. * M * (x_Psqr_k * (sigma**2 + x_Psqr_k) + rho[k] * (sigma**2 - rho[k])) / (sigma**2 * (sigma**2 + 2. * x_Psqr_k)**2)
+    # res /= k_fac
+    # res += -1. / (2 * x_Psqr_k + sigma**2)
+    
+    res = (
+        (rho[k] * (rho[k] - (sigma ** 2)) - x_Psqr_k * (x_Psqr_k + (sigma ** 2))) 
+        / (k_fac * (sigma ** 2) * (2. * x_Psqr_k + (sigma ** 2)))
+        - 1. / M
+    )
+    res *= M / (2. * x_Psqr_k + (sigma ** 2))
+    return res.unsqueeze(-1) * torch.einsum('ij, ...j -> ...i', sym_mat_k, x_new)
 
-    return out
     
 if __name__ == "__main__":
     x_new = torch.randn((11, 13))
