@@ -87,11 +87,11 @@ if __name__ == "__main__":
     sigma = 1.
 
     ### Set parameters for true signal
-    length = 41
+    length = 21
     signal_true = torch.zeros((length,), device=device, requires_grad=False)
-    # signal_true[0] = np.sqrt(41)
+    signal_true[0] += np.sqrt(length)
     # signal_true += 1.
-    signal_true += torch.randn_like(signal_true)
+    # signal_true += 0.001 * torch.randn_like(signal_true)
 
     ### Set parameters for conditioner
     conditioner_type = "power_spectrum" # "power_spectrum", "triple_correlation"
@@ -100,7 +100,7 @@ if __name__ == "__main__":
     use_none_cond = False
 
     ### Set parameters for score model
-    scoremodel_type = "none" # "gaussian", "learned", "none"
+    scoremodel_type = "gaussian" # "gaussian", "learned", "none"
     
     ### Set parameters for gaussian score model
     use_circulate = True # The circulate distribution is piecewise gaussian.
@@ -123,7 +123,7 @@ if __name__ == "__main__":
     plot_input = False
     plot_MRA_samples = False
     plot_projection = False
-    show_plot = False
+    show_plot = True
 
     ### Set parameters for visualization of scores
     ax_bound = 0.8
@@ -505,59 +505,77 @@ if __name__ == "__main__":
         # ax1.bar(torch.arange(length), signal_true, yerr=stds)
         # plt.title("True signal with empirical standard deviation per channel")
         # plt.savefig(f'./../figs/scorematching/{conditioner_type}/bardiagram_{length=}.png')
-
+        
         fig2, ax2 = plt.subplots()
-        ax2.boxplot(
+        vp2 = ax2.violinplot(
             aligned_output, 
             positions=range(length), 
-            label="Median Output Sample",
+            showmeans=True,
+            # showmedians=True,
+            # label="Median Output Sample",
         )
+        vp2['cmeans'].set_color('black') 
+        vp2['cbars'].set_color('green') 
+        vp2['cmins'].set_color('green') 
+        vp2['cmaxes'].set_color('green') 
+        for body in vp2['bodies']:
+            body.set_facecolor('lightgreen')
+            body.set_edgecolor('green')
         ax2.scatter(
             range(length), 
             signal_true, 
             c='r', 
-            marker='*', 
-            linewidth=5., 
+            marker='_', 
+            linewidth=2., 
             label="True Signal",
         )
         ax2.legend()
         ax2.xaxis.set_ticklabels([])
         if use_none_cond:
-            plt.title("Box plot of prior samples aligned with true signal.")
-            plt.savefig(f'./../figs/scorematching/{conditioner_type}/boxplot_samples_{length=}.png')
+            plt.title("Violin plot of prior samples aligned with true signal.")
+            plt.savefig(f'./../figs/scorematching/{conditioner_type}/violinplot_samples_{length=}.png')
         else:
             if use_random_statistics:
-                plt.title("Box plot of posterior samples wrt population power spectrum aligned with true signal.")
-                plt.savefig(f'./../figs/scorematching/{conditioner_type}/boxplot_samples_{length=}_poppwrspec.png')
+                plt.title("Violin plot of posterior samples wrt mean power spectrum.")
+                plt.savefig(f'./../figs/scorematching/{conditioner_type}/violinplot_samples_{length=}_poppwrspec.png')
             else:
-                plt.title("Box plot of posterior samples wrt true power spectrum aligned with true signal.")
-                plt.savefig(f'./../figs/scorematching/{conditioner_type}/boxplot_samples_{length=}_truepwrspec.png')
+                plt.title("Violin plot of posterior samples wrt true power spectrum.")
+                plt.savefig(f'./../figs/scorematching/{conditioner_type}/violinplot_samples_{length=}_truepwrspec.png')
         
         fig3, ax3 = plt.subplots()
-        ax3.boxplot(
+        vp3 = ax3.violinplot(
             output_power_spectra[:, :(length+1)//2], 
             positions=range((length+1)//2), 
-            label="Median Power Spectrum",
+            showmeans=True,
+            # showmedians=True,
+            # label="Median Power Spectrum",
         )
+        vp3['cmeans'].set_color('black') 
+        vp3['cbars'].set_color('green') 
+        vp3['cmins'].set_color('green') 
+        vp3['cmaxes'].set_color('green') 
+        for body in vp3['bodies']:
+            body.set_facecolor('lightgreen')
+            body.set_edgecolor('green')
         ax3.scatter(
             range((length+1)//2), 
             power_spectrum_true[:(length+1)//2], 
             c='r', 
-            marker='*', 
-            linewidth=5., 
+            marker='_', 
+            linewidth=2., 
             label="True Power Spectrum",
         )
         ax3.legend()
         if use_none_cond:
-            plt.title("Box plot of prior sample power spectra.")
-            plt.savefig(f'./../figs/scorematching/{conditioner_type}/boxplot_pwrspec_{length=}.png')
+            plt.title("Violin plot of prior sample power spectra.")
+            plt.savefig(f'./../figs/scorematching/{conditioner_type}/violinplot_pwrspec_{length=}.png')
         else:
             if use_random_statistics:
-                plt.title("Box plot of posterior sample power spectra wrt population power spectrum.")
-                plt.savefig(f'./../figs/scorematching/{conditioner_type}/boxplot_pwrspec_{length=}_poppwrspec.png')
+                plt.title("Violin plot of posterior sample power spectra wrt mean power spectrum.")
+                plt.savefig(f'./../figs/scorematching/{conditioner_type}/violinplot_pwrspec_{length=}_poppwrspec.png')
             else:
-                plt.title("Box plot of posterior sample power spectra wrt true power spectrum.")
-                plt.savefig(f'./../figs/scorematching/{conditioner_type}/boxplot_pwrspec_{length=}_truepwrspec.png')
+                plt.title("Violin plot of posterior sample power spectra wrt true power spectrum.")
+                plt.savefig(f'./../figs/scorematching/{conditioner_type}/violinplot_pwrspec_{length=}_truepwrspec.png')
 
     if show_plot:
         plt.show()
