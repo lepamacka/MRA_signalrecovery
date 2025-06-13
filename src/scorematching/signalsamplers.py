@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import matplotlib.pyplot as plt
 
 # Helper function, makes circulant matrix of input signal.
 def circulant(tensor, dim):
@@ -16,16 +17,28 @@ def circulant(tensor, dim):
     )
     return tmp.unfold(dim, S, 1).flip((-1,))
 
+def align(input, base):        
+    input_circulant = circulant(input, dim=-1)
+    best_shift_idx = (base.unsqueeze(0) - input_circulant).square().sum(dim=-1).min(dim=-1)[1]
+    if input.ndim == 1:
+        return input_circulant[best_shift_idx, :]
+    elif input.ndim == 2:
+        return input_circulant[torch.arange(input.shape[0]), best_shift_idx, :]
+    else: 
+        raise ValueError(f"{input.ndim = }, has to be 1 or 2.")
+
 # Parent class, all signal distributions should inherit and override/implement this class.
 class SignalSampler:
     def __init__(
         self, 
+        scale,
         signal, 
         length, 
         generator=None, 
         device='cpu',
     ):
         assert len(signal) == length
+        self.scale = scale
         self.length = length
         self.generator = generator
         self.device = device
@@ -49,14 +62,13 @@ class SignalSampler:
 class GaussianSampler(SignalSampler):
     def __init__(
         self, 
-        sigma, 
+        scale, 
         signal, 
         length, 
         generator=None, 
         device='cpu',
     ):
-        super().__init__(signal, length, generator, device)
-        self.sigma = sigma
+        super().__init__(scale, signal, length, generator, device)
 
     def __call__(
             self, 
@@ -79,7 +91,7 @@ class GaussianSampler(SignalSampler):
                 device=self.device
             )
         samples = self.signal_circulant[shifts.tolist(), :]
-        samples += self.sigma * torch.randn(
+        samples += self.scale * torch.randn(
             size=size_out, 
             generator=self.generator, 
             device=self.device
@@ -99,8 +111,7 @@ class DegenerateLoopSampler(SignalSampler):
         generator=None, 
         device='cpu',
     ):
-        super().__init__(signal, length, generator, device)     
-        self.scale = scale
+        super().__init__(scale, signal, length, generator, device)     
 
     def __call__(
         self, 
@@ -143,10 +154,74 @@ class DegenerateLoopSampler(SignalSampler):
         mat = mat.repeat(1, 2).unfold(1, self.length, 1)[:, :self.length, :]
         vecs = mat[torch.arange(shifts.shape[0]), -shifts, :]
         return vecs
-        
+    
     def __str__(self):
         return "loop"
 
+class PlanckSampler(SignalSampler):
+
+    def __init__(
+        self, 
+        scale, 
+        signal, 
+        length, 
+        b=1.,
+        generator=None, 
+        device='cpu',
+    ):
+        super().__init__(scale, signal, length, generator, device) 
+        self.b = b    
+        self.Y = torch.distributions.chi2.Chi2(df=4)
+        self.Z = torch.distributions.uniform.Uniform(0, 1)
+    
+    def __call__(
+        self, 
+        num=1, 
+        do_random_shifts=False,
+    ):
+        if do_random_shifts:
+            shifts = torch.randint(
+                low=0, 
+                high=self.length, 
+                size=(num,), 
+                generator=self.generator, 
+                device=self.device,
+            )
+        else:
+            shifts = torch.zeros(
+                (num,), 
+                dtype=torch.long, 
+                device=self.device,
+            )
+        y = self.Y.sample((num,)) / 2.
+        z = self.Z.sample((num,))
+        n = self.basel(z)
+        freqs = y / (self.b * n)
+        signals = self.signal + torch.sin(torch.einsum('n, l -> nl', freqs, torch.linspace(0, 2 * np.pi, length)))
+        signals_circulants = circulant(signals, dim=-1)
+        samples = signals_circulants[torch.arange(0, num), shifts, :]
+        randns = self.scale * torch.randn(
+            (num, self.length), 
+            device=self.device, 
+            generator=self.generator,
+        )
+        samples += randns
+        return samples
+    
+    def basel(self, rands):
+        basel_nums = torch.zeros_like(rands)
+        for idx, rand in enumerate(rands):
+            thresh = (np.pi ** 2) * rand / 6.
+            partial = 0
+            k = 0
+            while partial < thresh:
+                k += 1
+                partial += 1. / (k ** 2)
+            basel_nums[idx] += k
+        return basel_nums
+
+    def __str__(self):
+        return "planck"
 
 if __name__ == '__main__':
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -154,12 +229,16 @@ if __name__ == '__main__':
     generator = torch.Generator(device=device) 
     generator.seed()
 
-    length = 5
+    length = 41
     signal = torch.zeros((length,))
-    signal[0] = 1.
-    scale = 1.0
+    # signal[0] = 1.
+    scale = 0.01
+    b = 10.
     num = 10
     
-    loop_sampler = DegenerateLoopSampler(scale, signal, length, generator, device)
-    res = loop_sampler(num, True)
-    print(res)
+    loop_sampler = PlanckSampler(scale, signal, length, b, generator, device)
+    res = loop_sampler(num, do_random_shifts=False)
+    print(res.shape)
+
+    plt.plot(res)
+    plt.show()

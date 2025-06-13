@@ -1,8 +1,6 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from torchtyping import TensorType
-from signalsamplers import circulant
 
 # Score model for multireference alignment, equivariant with respect to shifts.
 class ConvScoreModel(nn.Module):
