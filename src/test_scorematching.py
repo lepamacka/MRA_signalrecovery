@@ -61,17 +61,15 @@ class GaussianScoreModel(torch.nn.Module):
             )
         return res
 
-def align(input, reference):        
+def align(input, base):        
     input_circulant = circulant(input, dim=-1)
-    best_shift_idx = (
-        reference.unsqueeze(0) - input_circulant
-    ).square().sum(dim=-1).min(dim=-1)[1]
+    best_shift_idx = (base.unsqueeze(0) - input_circulant).square().sum(dim=-1).min(dim=-1)[1]
     if input.ndim == 1:
         return input_circulant[best_shift_idx, :]
     elif input.ndim == 2:
         return input_circulant[torch.arange(input.shape[0]), best_shift_idx, :]
     else: 
-        raise ValueError(f"{input.ndim = }, which is greater than 2.")
+        raise ValueError(f"{input.ndim = }, has to be 1 or 2.")
 
 if __name__ == "__main__":
     
@@ -83,29 +81,29 @@ if __name__ == "__main__":
     print(f"Current device is \'{device}\'.")
 
     ### Set parameters for MRA
-    M = 1000
-    sigma = 1.
+    M = 1000000
+    sigma = 5.
 
     ### Set parameters for true signal
-    length = 21
+    length = 3
     signal_true = torch.zeros((length,), device=device, requires_grad=False)
     signal_true[0] += np.sqrt(length)
     # signal_true += 1.
     # signal_true += 0.001 * torch.randn_like(signal_true)
 
     ### Set parameters for conditioner
-    conditioner_type = "power_spectrum" # "power_spectrum", "triple_correlation"
+    conditioner_type = "triple correlation" # "power spectrum", "triple_correlation"
     use_random_statistics = False
-    use_CLT = False
+    use_CLT = True
     use_none_cond = False
 
     ### Set parameters for score model
     scoremodel_type = "gaussian" # "gaussian", "learned", "none"
     
     ### Set parameters for gaussian score model
-    use_circulate = True # The circulate distribution is piecewise gaussian.
+    use_circulate = True # If True, the distribution is piecewise gaussian.
     prior_mean = signal_true
-    prior_A = 1. * torch.eye(n=length, device=device)
+    prior_A = 0.5 * torch.eye(n=length, device=device)
     # prior_mean = torch.tensor([1., 0., 0.], device=device)
     # prior_A = 0.1*torch.tensor([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], device=device)
 
@@ -114,9 +112,9 @@ if __name__ == "__main__":
     hiddendim = 8
 
     ### Set parameters for Langevin sampling
-    num_steps = 10000
+    num_steps = 200000
     num_samples = 2 ** 10
-    eps = 1e-3
+    eps = 5e-6
 
     ### Set parameters for plotting
     plot_output_only = False
@@ -163,8 +161,8 @@ if __name__ == "__main__":
 
     if use_none_cond:
         conditioner = None
-        conditioner_type = "no_conditioner"
-    elif conditioner_type == "power_spectrum":
+        conditioner_type = "no conditioner"
+    elif conditioner_type == "power spectrum":
         conditioner = functools.partial(
             pwrspec_score,
             rho=sample_power_spectrum,
@@ -173,7 +171,7 @@ if __name__ == "__main__":
             device=device,
             CLT=use_CLT,
         )
-    elif conditioner_type == "triple_correlation":
+    elif conditioner_type == "triple correlation":
         if length == 3:
             conditioner = functools.partial(
                 triple_corr_score_3,
@@ -377,33 +375,38 @@ if __name__ == "__main__":
                     marker='*',
                     linewidth=4.,
                 )
-                theta = np.linspace(0, 2 * np.pi, 100)
-                radius = torch.norm(signal_true - signal_true.mean()).item()
-                phi = -np.pi/4
-                xyz = np.stack(
-                    [
-                        radius * np.sin(theta) * np.cos(phi),
-                        radius * np.sin(theta) * np.sin(phi),
-                        radius * np.cos(theta),
-                    ],
-                    axis=0,
-                ) # Start with a circle around the x-axis (theta), rotate to circle around [1, 1, 0] (phi).
-                rotmat = np.array(
-                    [
-                        [0.9082704, -0.0917296, -0.4082040],
-                        [-0.0917296, 0.9082704, -0.4082040],
-                        [0.4082040, 0.4082040, 0.8165408],
-                    ]
-                ) # Rotation by 35.26 degrees to go from circle around [1, 1, 0] to circle around [1, 1, 1].
-                xyz = rotmat @ xyz
-                xyz1 = xyz + signal_true[0:3].mean().item()
-                xyz2 = xyz - signal_true[0:3].mean().item()
-                ax.plot(xyz1[0, ...], xyz1[1, ...], xyz1[2, ...], c='red', linestyle='dotted', linewidth=1.5)
-                ax.plot(xyz2[0, ...], xyz2[1, ...], xyz2[2, ...], c='red', linestyle='dotted', linewidth=1.5)
+                if conditioner_type == "power spectrum":
+                    theta = np.linspace(0, 2 * np.pi, 100)
+                    radius = torch.norm(signal_true - signal_true.mean()).item()
+                    phi = -np.pi/4
+                    xyz = np.stack(
+                        [
+                            radius * np.sin(theta) * np.cos(phi),
+                            radius * np.sin(theta) * np.sin(phi),
+                            radius * np.cos(theta),
+                        ],
+                        axis=0,
+                    ) # Start with a circle around the x-axis (theta), rotate to circle around [1, 1, 0] (phi).
+                    rotmat = np.array(
+                        [
+                            [0.9082704, -0.0917296, -0.4082040],
+                            [-0.0917296, 0.9082704, -0.4082040],
+                            [0.4082040, 0.4082040, 0.8165408],
+                        ]
+                    ) # Rotation by 35.26 degrees to go from circle around [1, 1, 0] to circle around [1, 1, 1].
+                    xyz = rotmat @ xyz
+                    xyz1 = xyz + signal_true[0:3].mean().item()
+                    xyz2 = xyz - signal_true[0:3].mean().item()
+                    ax.plot(xyz1[0, ...], xyz1[1, ...], xyz1[2, ...], c='red', linestyle='dotted', linewidth=1.5)
+                    ax.plot(xyz2[0, ...], xyz2[1, ...], xyz2[2, ...], c='red', linestyle='dotted', linewidth=1.5)
+                    if plot_input:
+                        ax.legend(["Origin", output_samples_tag, "Gaussian Samples", "True Signal", "Phase Manifold"])  
+                    else:
+                        ax.legend(["Origin", output_samples_tag, "True Signal", "Phase Manifold"])  
                 if plot_input:
-                    ax.legend(["Origin", output_samples_tag, "Gaussian Samples", "True Signal", "Phase Manifold"])  
+                    ax.legend(["Origin", output_samples_tag, "Gaussian Samples", "True Signal"])  
                 else:
-                    ax.legend(["Origin", output_samples_tag, "True Signal", "Phase Manifold"])  
+                    ax.legend(["Origin", output_samples_tag, "True Signal"])  
             else:
                 if plot_input:
                     ax.legend(["Origin", output_samples_tag, "Gaussian Samples"])
@@ -536,10 +539,10 @@ if __name__ == "__main__":
             plt.savefig(f'./../figs/scorematching/{conditioner_type}/violinplot_samples_{length=}.png')
         else:
             if use_random_statistics:
-                plt.title("Violin plot of posterior samples wrt mean power spectrum.")
+                plt.title(f"Violin plot of posterior samples wrt mean {conditioner_type}.")
                 plt.savefig(f'./../figs/scorematching/{conditioner_type}/violinplot_samples_{length=}_poppwrspec.png')
             else:
-                plt.title("Violin plot of posterior samples wrt true power spectrum.")
+                plt.title(f"Violin plot of posterior samples wrt true {conditioner_type}.")
                 plt.savefig(f'./../figs/scorematching/{conditioner_type}/violinplot_samples_{length=}_truepwrspec.png')
         
         fig3, ax3 = plt.subplots()
@@ -571,10 +574,10 @@ if __name__ == "__main__":
             plt.savefig(f'./../figs/scorematching/{conditioner_type}/violinplot_pwrspec_{length=}.png')
         else:
             if use_random_statistics:
-                plt.title("Violin plot of posterior sample power spectra wrt mean power spectrum.")
+                plt.title(f"Violin plot of posterior sample power spectra wrt mean {conditioner_type}.")
                 plt.savefig(f'./../figs/scorematching/{conditioner_type}/violinplot_pwrspec_{length=}_poppwrspec.png')
             else:
-                plt.title("Violin plot of posterior sample power spectra wrt true power spectrum.")
+                plt.title(f"Violin plot of posterior sample power spectra wrt true {conditioner_type}.")
                 plt.savefig(f'./../figs/scorematching/{conditioner_type}/violinplot_pwrspec_{length=}_truepwrspec.png')
 
     if show_plot:

@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 import numpy as np
+from torchtyping import TensorType
+from signalsamplers import circulant
 
 # Score model for multireference alignment, equivariant with respect to shifts.
 class ConvScoreModel(nn.Module):
@@ -70,4 +72,3 @@ class BatchConvolver1D(nn.Module):
         h_pad = self.circpad(h)
         output = torch.vmap(nn.functional.conv1d)(h_pad, kernels)
         return output
-    

@@ -11,7 +11,8 @@ def triple_corr_score_3(
         CLT=True,
         device='cpu',
 ) -> TensorType[..., "L"]:
-    x_new = x.clone().to(device)    
+    x_new = x.clone().to(device)
+    
     proj_op = torch.tensor(
         [
             [3., 1., 1., 1., 1., 1., 1., 0., 0.],

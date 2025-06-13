@@ -1,5 +1,16 @@
 import torch 
 import numpy as np
+from signalsamplers import circulant
+
+def align(input, base):        
+    input_circulant = circulant(input, dim=-1)
+    best_shift_idx = (base.unsqueeze(0) - input_circulant).square().sum(dim=-1).min(dim=-1)[1]
+    if input.ndim == 1:
+        return input_circulant[best_shift_idx, :]
+    elif input.ndim == 2:
+        return input_circulant[torch.arange(input.shape[0]), best_shift_idx, :]
+    else: 
+        raise ValueError(f"{input.ndim = }, has to be 1 or 2.")
 
 @torch.no_grad()
 def Langevin_sampler(
