@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import signalsamplers as samplers
 from models.scoremodels import ConvScoreModel
 from losses import loss_fn_score
-from datasets import seed_worker, ReferenceVectorSampler
+from datasets import ReferenceVectorSampler
 from time import perf_counter
 import os
 
@@ -23,12 +23,8 @@ if __name__ == '__main__':
     # generator.manual_seed(1337)
     # generator_cpu.manual_seed(1337)
 
-    length = 3
-    hiddendim = 8
-    
-    model = ConvScoreModel(length=length, hiddendim=hiddendim).to(device)
-    model_name = f"MRA_convscoremodel_length{length}_hiddim{hiddendim}"
-    model.train()
+    length = 81
+    hiddendim = 4
     
     batchsize = 2**8
     batchnum = 2**6
@@ -38,18 +34,26 @@ if __name__ == '__main__':
 
     signal = torch.zeros((length))
     # signal[0, :length//2] = torch.sin(2. * math.pi * torch.arange(0, length//2)/length)
-    signal[0] = 2
+    # signal[0] = 2
     # signal = torch.randn((1,length), generator=generator)
     # signal_sigma = 0.2
+
     # signal_sampler = samplers.GaussianSignal(
     #     length=length, 
     #     mu=signal, 
     #     sigma=signal_sigma
     # )
-    signal_sampler = samplers.DegenerateLoopSampler(
+    # signal_sampler = samplers.DegenerateLoopSampler(
+    #     length=length, 
+    #     signal=signal, 
+    #     scale=1.,
+    # )
+    signal_sampler = samplers.PlanckSampler(
         length=length, 
         signal=signal, 
         scale=1.,
+        generator=generator_cpu,
+        device='cpu',
     )
     
     # SNR = 9
@@ -65,12 +69,15 @@ if __name__ == '__main__':
         generator=generator_cpu,
         device='cpu'
     )
+
+    model = ConvScoreModel(length=length, hiddendim=hiddendim).to(device)
+    model_name = f"MRA_convscoremodel_length{length}_hiddim{hiddendim}_signal{str(signal_sampler)}"
+    model.train()
     
     # Have not found a way to ensure reproducibility with seed, probably due to dataloader peculiarities. 
     dataloader = torch.utils.data.DataLoader(
         dataset=dataset, 
         batch_size=batchsize, 
-        worker_init_fn=seed_worker, 
         generator=generator_cpu
     )
     
@@ -117,7 +124,7 @@ if __name__ == '__main__':
     
     print(f"\nTotal time elapsed: {t_1-t_0} secs.")
     
-    PATH = "./../model_weights/scorematching/" 
+    PATH = "./../../model_weights/scorematching/" 
     if not os.path.exists(PATH):
         raise ValueError
     PATH = PATH + model_name + "/"

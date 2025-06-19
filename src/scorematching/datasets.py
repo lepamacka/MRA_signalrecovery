@@ -17,13 +17,9 @@ class ReferenceVectorIterator:
         sigma, 
         epochsize, 
         generator=None,
-        device='cpu'
+        device='cpu',
     ):
-        self.signals = signal_sampler(
-            size=(epochsize,),
-            generator=generator,
-            device=device
-        )
+        self.signals = signal_sampler(size=(epochsize,))
         self.shifts = torch.randint(
             low=0, 
             high=length, 

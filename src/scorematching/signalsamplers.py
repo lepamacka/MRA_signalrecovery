@@ -72,21 +72,21 @@ class GaussianSampler(SignalSampler):
 
     def __call__(
             self, 
-            num=1, 
-            do_random_shifts=False
+            size=(1,),
+            do_random_shifts=False,
         ):
-        size_out = (num, self.length)
+        size_out = size + (self.length,)
         if do_random_shifts:
             shifts = torch.randint(
                 low=0, 
                 high=self.length, 
-                size=(num,), 
+                size=size, 
                 generator=self.generator, 
                 device=self.device,
             )
         else:
             shifts = torch.zeros(
-                (num,), 
+                size=size,
                 dtype=torch.long, 
                 device=self.device
             )
@@ -115,26 +115,26 @@ class DegenerateLoopSampler(SignalSampler):
 
     def __call__(
         self, 
-        num=1, 
+        size=(1,),
         do_random_shifts=False,
     ):
         if do_random_shifts:
             shifts = torch.randint(
                 low=0, 
                 high=self.length, 
-                size=(num,), 
+                size=size, 
                 generator=self.generator, 
                 device=self.device,
             )
         else:
             shifts = torch.zeros(
-                (num,), 
+                size, 
                 dtype=torch.long, 
                 device=self.device,
             )
         samples = self.signal_circulant[shifts, :]
         rands = torch.rand(
-            (num,), 
+            size, 
             device=self.device, 
             generator=self.generator,
         )
@@ -165,54 +165,46 @@ class PlanckSampler(SignalSampler):
         scale, 
         signal, 
         length, 
-        b=1.,
         generator=None, 
         device='cpu',
     ):
         super().__init__(scale, signal, length, generator, device) 
-        self.b = b    
         self.Y = torch.distributions.chi2.Chi2(df=4)
         self.Z = torch.distributions.uniform.Uniform(0, 1)
     
     def __call__(
         self, 
-        num=1, 
+        size=(1,),
         do_random_shifts=False,
     ):
         if do_random_shifts:
             shifts = torch.randint(
                 low=0, 
                 high=self.length, 
-                size=(num,), 
+                size=size, 
                 generator=self.generator, 
                 device=self.device,
             )
         else:
             shifts = torch.zeros(
-                (num,), 
+                size=size, 
                 dtype=torch.long, 
                 device=self.device,
             )
-        y = self.Y.sample((num,)) / 2.
-        z = self.Z.sample((num,))
+        y = self.Y.sample(size) / 2.
+        z = self.Z.sample(size)
         n = self.basel(z)
-        freqs = y / (self.b * n)
-        signals = self.signal + torch.sin(torch.einsum('n, l -> nl', freqs, torch.linspace(0, 2 * np.pi, length)))
+        freqs = y / (self.scale * n)
+        signals = self.signal + torch.sin(torch.einsum('n, l -> nl', freqs, torch.linspace(0, 2 * np.pi, self.length)))
         signals_circulants = circulant(signals, dim=-1)
-        samples = signals_circulants[torch.arange(0, num), shifts, :]
-        randns = self.scale * torch.randn(
-            (num, self.length), 
-            device=self.device, 
-            generator=self.generator,
-        )
-        samples += randns
+        samples = signals_circulants[torch.arange(0, size[0]), shifts, :]
         return samples
     
     def basel(self, rands):
         basel_nums = torch.zeros_like(rands)
         for idx, rand in enumerate(rands):
             thresh = (np.pi ** 2) * rand / 6.
-            partial = 0
+            partial = 0.
             k = 0
             while partial < thresh:
                 k += 1
@@ -229,16 +221,16 @@ if __name__ == '__main__':
     generator = torch.Generator(device=device) 
     generator.seed()
 
-    length = 41
+    length = 81
     signal = torch.zeros((length,))
     # signal[0] = 1.
-    scale = 0.01
-    b = 10.
-    num = 10
+    scale = 0.1
+    b = 1.
+    num = 20
     
     loop_sampler = PlanckSampler(scale, signal, length, b, generator, device)
-    res = loop_sampler(num, do_random_shifts=False)
+    res = loop_sampler((num,), do_random_shifts=False)
     print(res.shape)
 
-    plt.plot(res)
+    plt.plot(res.T)
     plt.show()

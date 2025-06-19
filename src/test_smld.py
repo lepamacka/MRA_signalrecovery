@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from matplotlib import animation
 from torch.fft import fft, ifft
 from smld.models.helpers import marginal_prob_std, diffusion_coeff
-from smld.signalsamplers import circulant
+from smld.signalsamplers import circulant, align
 import smld.signalsamplers as samplers
 from smld.models.convolutional import Convolutional
 from smld.models.MLP import MLP
@@ -45,50 +45,49 @@ if __name__ == "__main__":
 
     # Choose the type of diffusion score model.
     # Also set correct signal length and maximal diffusion sigma.
-    scoremodel_type = "gaussian" # "gaussian", "learned"
-    length = 3
-    diffusion_sigma = 25.
+    scoremodel_type = "learned" # "gaussian", "learned"
+    length = 41
+    diffusion_sigma = 3.0
 
     # Conditioner parameters
     use_none_cond = False
-    use_CLT = False
+    use_CLT = True
     use_random_power_spectrum = False
     use_random_true_signal = False
-    cond_start_frac = 0.
+    cond_start_frac = 0.9
 
     # MRA parameters
-    M = 100
-    MRA_sigma = 1.
+    M = 1000000
+    MRA_sigma = 10.
 
-    # Set true signal if not using random signal
+    # If not using random signal, set true signal.
     signal_true = torch.zeros(length, device=device)
-    signal_true[0] = 1
+    signal_true[length//4:3*(length//4)] += 1.
+    # signal_true[0] = 1
 
-    # Set gaussian diffusion model parameters.
+    # If gaussian diffusion model, set parameters.
     prior_sigma = 1.
     mean_true = 1.
     mean_vec = mean_true * torch.ones(length, device=device)
-    if not use_random_true_signal:
-        signal_true = mean_vec
 
-    # Set learned diffusion model parameters.
-    # Learned model must exist on PATH.
-    PATH = "./../../model_weights/smld/" 
-    hidden_layers = 7
-    hidden_dim = 32
-    embed_dim = 32
-    signal_sampler_type = "loop" 
-    signal_scale = .3
+    # If learned diffusion model, set parameters.
+    MODEL_PATH = "./../../model_weights/smld/" 
+    learned_model_type = "conv" # "conv", "mlp"
+    hidden_layers = 8
+    hidden_dim = 4
+    embed_dim = 64
+    signal_sampler_type = "hat" # "hat", "loop"
+    signal_scale = 1.0
 
     # Diffusion sampler parameters
     model_sampler = Euler_Maruyama_sampler
-    diffusion_steps = 100000
-    diffusion_samples = 2**8
-    diffusion_epsilon = 1e-7
+    diffusion_steps = 30000
+    diffusion_samples = 200
+    diffusion_epsilon = 1e-5
 
     # Set parameters for plotting
     plot_signal_samples = True
-    plot_projection = True
+    plot_projection = False
     show_plot = True
 
     # Set parameters for visualization of scores across diffusion time.
@@ -97,6 +96,12 @@ if __name__ == "__main__":
     ax_bound = 2
     ax_pts = 20
 
+    # Set path where figs will be saved.
+    FIG_PATH = "./../figs/smld/" # NOT LOCATION SAFE
+    assert os.path.exists(FIG_PATH), "FIG_PATH must exist."
+    FIG_PATH += f"{length}/"
+    if not os.path.exists(FIG_PATH):
+        os.makedirs(FIG_PATH)
     
     ## Score model setup
     marginal_prob_std_fn = functools.partial(
@@ -111,16 +116,27 @@ if __name__ == "__main__":
     )
 
     if scoremodel_type == "learned":
-        assert os.path.exists(PATH), "PATH must exist."
-        scoremodel = MLP(
-            marginal_prob_std_fn, 
-            length, 
-            hidden_dim, 
-            hidden_layers, 
-            embed_dim,
-        ).to(device)
+        assert os.path.exists(MODEL_PATH), "MODEL_PATH must exist."
+        if learned_model_type == "mlp":
+            scoremodel = MLP(
+                marginal_prob_std_fn, 
+                length, 
+                hidden_dim, 
+                hidden_layers, 
+                embed_dim,
+            ).to(device)
+        elif learned_model_type == "conv":
+            scoremodel = Convolutional(
+                marginal_prob_std_fn, 
+                length, 
+                hidden_dim, 
+                hidden_layers, 
+                embed_dim,
+            ).to(device)
+        else:
+            raise NotImplementedError(f"No learned model has type {learned_model_type}")
 
-        model_path_name = "_".join((
+        model_name = "_".join((
             f"{str(scoremodel)}",
             f"len{length}",
             f"lay{hidden_layers}",
@@ -129,20 +145,40 @@ if __name__ == "__main__":
             f"sigma{diffusion_sigma}",
             f"{signal_sampler_type}{signal_scale}",
         ))
-        PATH = PATH + model_path_name + "/"
-        print("Score model is loaded from " + PATH)
-        signal_base = torch.load(PATH+"signal.pth", weights_only=True).to(device)
+        MODEL_PATH += f"{model_name}/"
+        if not os.path.exists(MODEL_PATH): 
+            print(f"Got an invalid {MODEL_PATH = }")
+        else:
+            print(f"Score model is loaded from {MODEL_PATH}")
+        
+        base_signal = torch.load(MODEL_PATH+"signal.pth", weights_only=True).to(device)
         if signal_sampler_type == "loop":
             signal_sampler = samplers.DegenerateLoopSampler(
-                signal_scale, 
-                signal_base, 
-                length, 
+                scale=signal_scale, 
+                signal=base_signal, 
+                length=length, 
+                generator=generator, 
+                device=device,
+            )
+        elif signal_sampler_type == "planck":
+            signal_sampler = samplers.PlanckSampler(
+                scale=signal_scale, 
+                signal=base_signal, 
+                length=length, 
+                generator=generator, 
+                device=device,
+            )
+        elif signal_sampler_type == "hat":
+            signal_sampler = samplers.HatSampler(
+                scale=signal_scale, 
+                signal=base_signal, 
+                length=length, 
                 generator=generator, 
                 device=device,
             )
         else: 
-            raise NotImplementedError
-        scoremodel.load_state_dict(torch.load(PATH+"weights_dict.pth", weights_only=True))
+            raise NotImplementedError(f"No signal sampler has type {signal_sampler_type}")
+        scoremodel.load_state_dict(torch.load(MODEL_PATH+"weights_dict.pth", weights_only=True))
         scoremodel.eval()
     elif scoremodel_type == "gaussian":
         scoremodel = GaussianDiffusionModel(
@@ -151,13 +187,15 @@ if __name__ == "__main__":
             marginal_prob_std=marginal_prob_std_fn,
         ).to(device)
         signal_sampler = samplers.GaussianSampler(
-            sigma=prior_sigma, 
+            scale=prior_sigma, 
             signal=mean_vec, 
             length=length, 
+            generator=generator, 
             device=device,
         )
     else: 
-        raise NotImplementedError
+        raise NotImplementedError(f"No diffusion model has type {scoremodel_type}")
+    
     
     ## Generate signal samples from the true prior.
     signal_samples = signal_sampler(num=diffusion_samples, do_random_shifts=True).squeeze(0)
@@ -173,9 +211,10 @@ if __name__ == "__main__":
     power_spectrum_true = torch.abs(fft(signal_true, norm='ortho')).square()
 
     MRA_sampler = samplers.GaussianSampler(
-        sigma=MRA_sigma, 
+        scale=MRA_sigma, 
         signal=signal_true, 
-        length=length, 
+        length=length,
+        generator=generator, 
         device=device,
     )
     MRA_samples = MRA_sampler(num=M, do_random_shifts=True)
@@ -251,19 +290,26 @@ if __name__ == "__main__":
 
 
     ## Visualization
+
+    # Hyperparameters for plotting
     plane_mag = signal_true.mean().item()
+    plt.rcParams.update({
+        "text.usetex": True,
+        "font.family": "serif",
+        "font.sans-serif": "Times",
+    })
 
     # Plot samples from diffusion sampler. ONLY FOR length = 3.
     if length == 3:
         fig = plt.figure()
         ax = fig.add_subplot(projection='3d')
-        ax.scatter(
-            [0.],
-            [0.],
-            [0.],
-            c='black',
-            marker = 'x',
-        )
+        # ax.scatter(
+        #     [0.],
+        #     [0.],
+        #     [0.],
+        #     c='black',
+        #     marker = 'x',
+        # )
         ax.scatter(
             model_samples[:, 0].to('cpu'), 
             model_samples[:, 1].to('cpu'), 
@@ -305,18 +351,18 @@ if __name__ == "__main__":
             xyz2 = xyz - signal_true[0:3].mean().item()
             ax.plot(xyz1[0, ...], xyz1[1, ...], xyz1[2, ...], c='red', linestyle='dotted', linewidth=1.5)
             ax.plot(xyz2[0, ...], xyz2[1, ...], xyz2[2, ...], c='red', linestyle='dotted', linewidth=1.5)
-            ax.legend(['Origin', 'Model samples', 'True signal', 'Phase manifold'])
+            legend_list = ['Model samples', 'True signal', 'Phase manifold']
         else:
-            ax.legend(['Origin', 'Model samples', 'True signal'])
+            legend_list = ['Model samples', 'True signal']
+        ax.legend(legend_list)
         ax.set_aspect('equal')
         ax.set_xlabel("x")
         ax.set_ylabel("y")
         ax.set_zlabel("z")
         ax.view_init(elev=35, azim=45, roll=0)
-        plt.savefig('./../figs/smld/model_samples_3d.png')
+        plt.savefig(FIG_PATH + 'model_samples_3d.png')
         ax.view_init(elev=90, azim=0, roll=0)
-        plt.savefig('./../figs/smld/model_samples_top.png')
-        # plt.show()
+        plt.savefig(FIG_PATH + 'model_samples_top.png')
 
     # Plot samples from signal sampler. ONLY FOR length = 3.
     if length == 3 and plot_signal_samples:
@@ -355,9 +401,9 @@ if __name__ == "__main__":
         ax.set_ylabel("y")
         ax.set_zlabel("z")
         ax.view_init(elev=35, azim=45, roll=0)
-        plt.savefig('./../figs/smld/signal_samples_3d.png')
+        plt.savefig(FIG_PATH + 'signal_samples_3d.png')
         ax.view_init(elev=90, azim=0, roll=0)
-        plt.savefig('./../figs/smld/signal_samples_top.png')
+        plt.savefig(FIG_PATH + 'signal_samples_top.png')
 
     # Plot signal and model samples. ONLY FOR length = 3.
     if length == 3 and plot_signal_samples:
@@ -427,9 +473,9 @@ if __name__ == "__main__":
         ax.set_ylabel("y")
         ax.set_zlabel("z")
         ax.view_init(elev=35, azim=45, roll=0)
-        plt.savefig('./../figs/smld/all_samples_3d.png')
+        plt.savefig(FIG_PATH + 'all_samples_3d.png')
         ax.view_init(elev=90, azim=0, roll=0)
-        plt.savefig('./../figs/smld/all_samples_top.png')
+        plt.savefig(FIG_PATH + 'all_samples_top.png')
 
     # Project unconditional scores in plane containing true signal.
     if length >= 3 and plot_projection:
@@ -486,7 +532,7 @@ if __name__ == "__main__":
 
         plt.title(f"2D projection of unconditional scores at diffusion time {min_diffusion_time_plt}")
         fig.tight_layout()
-        plt.savefig('./../figs/smld/unconditional_scores.png')
+        plt.savefig(FIG_PATH + 'unconditional_scores.png')
 
         # If conditioner is used, project conditional scores in plane containing true signal.
         if not use_none_cond:
@@ -544,7 +590,77 @@ if __name__ == "__main__":
 
             plt.title(f"2D projection of conditional scores at diffusion time {min_diffusion_time_plt}")
             fig.tight_layout()
-            plt.savefig('./../figs/smld/conditional_scores.png')
+            plt.savefig(FIG_PATH + 'conditional_scores.png')
+
+    if length > 3:
+        if plot_signal_samples:
+            fig_s, ax_s = plt.subplots()
+            ax_s.plot(signal_true.to('cpu'), c='r', linestyle="dashed")
+            ax_s.plot(signal_samples.to('cpu').T)
+            ax_s.plot(signal_true.to('cpu'), c='r', linestyle="dashed")
+            ax_s.legend(["True signal"])
+            plt.title(f"Samples of true signal distribution")
+            fig_s.tight_layout()
+            plt.savefig(FIG_PATH + 'signal_samples.png')
+            plt.savefig(FIG_PATH + 'signal_samples.pdf')
+        
+
+        aligned_samples = align(model_samples, signal_true)
+        # tmp = torch.zeros_like(model_samples)
+        # tmp[:, :-1] += model_samples[:, 1:] - model_samples[:, :-1]
+        # tmp[:, -1] = model_samples[:, 0] - model_samples[:, -1]
+        # tmp_idxs = tmp.max(dim=-1)[1]
+        # aligned_samples = circulant(model_samples, dim=-1)[range(diffusion_samples), :, tmp_idxs]
+
+        colors = ["darkgreen", "forestgreen", "mediumaquamarine", "deepskyblue", "olive"]
+        for plot_idx in range(diffusion_samples//5):
+            fig_m, ax_m = plt.subplots()
+            ax_m.plot(
+                signal_true.to('cpu'), 
+                c='r', 
+                linestyle="dashed", 
+                linewidth=1.5,
+                zorder=2,
+            )
+            for idx, sample in enumerate(aligned_samples[5*plot_idx:5*(plot_idx+1), :].to('cpu')):
+                ax_m.plot(
+                    sample, 
+                    color=colors[idx],
+                    linewidth=1.5,
+                    zorder=1,
+                )
+            ax_m.legend(
+                ["True signal"],
+                fontsize=14, 
+                loc='upper right', 
+                # bbox_to_anchor=(0.98, 1.01, 0, 0),
+                handlelength=1.15,
+            )
+            ax_m.set_xlim(-0.5, 40.5)
+            ax_m.set_ylim(-0.25, 1.25)
+            ax_m.set_xticks(range(0, 41, 5))
+            ax_m.set_xticks(range(41), minor=True)
+            ax_m.set_yticks([0, 1])
+            ax_m.set_yticks(np.arange(-0.2, 1.4, 0.2), minor=True)
+            ax_m.set_xticklabels(
+                range(0, 41, 5),
+                fontsize=14,
+            )
+            ax_m.set_yticklabels(
+                [0, 1], 
+                fontsize=14,
+                # verticalalignment='baseline',
+                # horizontalalignment='left',
+            )
+            fig_m.tight_layout()
+            if use_none_cond:
+                # plt.title(f"Prior samples aligned with true signal")
+                plt.savefig(FIG_PATH + f'prior_samples_{plot_idx}.png')
+                plt.savefig(FIG_PATH + f'prior_samples_{plot_idx}.pdf')
+            else:
+                # plt.title(f"Posterior samples aligned with true signal")
+                plt.savefig(FIG_PATH + f'posterior_samples_{plot_idx}.png')
+                plt.savefig(FIG_PATH + f'posterior_samples_{plot_idx}.pdf')
     
     if show_plot:
         plt.show()

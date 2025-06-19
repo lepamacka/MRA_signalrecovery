@@ -20,28 +20,44 @@ if __name__ == '__main__':
     generator = torch.Generator(device=device) 
     generator.seed()
 
-    length = 3
-    signal = torch.zeros((length,))
-    # signal[0, :length//2] = torch.sin(2. * math.pi * torch.arange(0, length//2)/length)
-    signal[0] = 1.
-    signal_scale = .3
-    signal_sampler = signalsamplers.DegenerateLoopSampler(
-        signal_scale, 
-        signal, 
-        length, 
+    length = 41
+    base_signal = torch.zeros((length,))
+    # base_signal[0, :length//2] = torch.sin(2. * math.pi * torch.arange(0, length//2)/length)
+    # base_signal[0] = 1.
+    sampler_scale = 1.
+
+    # signal_sampler = signalsamplers.DegenerateLoopSampler(
+    #     scale=signal_scale, 
+    #     signal=base_signal, 
+    #     length=length, 
+    #     generator=generator, 
+    #     device=device,
+    # )
+    # signal_sampler = signalsamplers.PlanckSampler(
+    #     scale=sampler_scale, 
+    #     signal=base_signal, 
+    #     length=length, 
+    #     generator=generator, 
+    #     device=device,
+    # )
+    signal_sampler = signalsamplers.HatSampler(
+        scale=sampler_scale, 
+        signal=base_signal, 
+        length=length, 
         generator=generator, 
         device=device,
     )
 
-    hidden_layers = 5
-    hidden_dim = 16
-    embed_dim = 16
-    model_sigma = 2.5
+    hidden_layers = 8
+    hidden_dim = 4
+    embed_dim = 64
+    model_sigma = 3.0
 
     batch_size = 2**8
     batch_num = 2**8
-    n_epochs = 100
-    learning_rate = 1e-4
+    n_epochs = 1000
+    learning_rate = 1e-3
+    scheduler_startfactor = 0.1
     digs = int(math.log10(n_epochs))+1
     epoch_size = batch_size * batch_num
 
@@ -57,6 +73,13 @@ if __name__ == '__main__':
         hidden_layers, 
         embed_dim,
     ).to(device)
+    # model = MLP(
+    #     marginal_prob_std_fn, 
+    #     length, 
+    #     hidden_dim, 
+    #     hidden_layers, 
+    #     embed_dim,
+    # ).to(device)
     model.train()
 
     print(f"Model parameters: {sum(p.numel() for p in model.parameters())}")
@@ -70,13 +93,13 @@ if __name__ == '__main__':
         f"hid{hidden_dim}",
         f"emb{embed_dim}",
         f"sigma{model_sigma}",
-        f"{str(signal_sampler)}{signal_scale}",
+        f"{str(signal_sampler)}{sampler_scale}",
     ))
     
-    PATH = "/mnt/data0/axejan/MRA_model_weights/smld/" 
+    PATH = "./../../../model_weights/smld/" # NOT LOCATION SAFE
     assert os.path.exists(PATH), "PATH must exist."
 
-    PATH = PATH + model_path_name + "/" # Not location safe.
+    PATH = PATH + model_path_name + "/" 
     if not os.path.exists(PATH):
         os.makedirs(PATH)
     
@@ -89,9 +112,8 @@ if __name__ == '__main__':
 
     dataloader = torch.utils.data.DataLoader(
         dataset=dataset, 
-        batch_size=batch_size
+        batch_size=batch_size,
     ) # Maybe use: worker_init_fn=seed_worker, see datasamplers.py
-    
 
     optimizer = optim.Adam(
         model.parameters(), 
@@ -100,7 +122,7 @@ if __name__ == '__main__':
 
     scheduler = LinearLR(
         optimizer, 
-        start_factor=0.1, 
+        start_factor=scheduler_startfactor, 
         end_factor=1, 
         total_iters=n_epochs//3,
     )
@@ -126,11 +148,11 @@ if __name__ == '__main__':
                 marginal_prob_std_fn, 
                 device=device,
             )
+            loss_avg += loss
+            specloss_avg += specloss
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            loss_avg += loss
-            specloss_avg += specloss
         scheduler.step()
         t_e1 = perf_counter()
         loss_avg = loss_avg/batch_num
@@ -148,4 +170,4 @@ if __name__ == '__main__':
     print(f"\nTotal time elapsed: {t_1-t_0} secs.")
     
     torch.save(model.state_dict(), PATH+"weights_dict.pth")
-    torch.save(signal, PATH+"signal.pth")
+    torch.save(base_signal, PATH+"signal.pth")
