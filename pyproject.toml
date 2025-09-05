@@ -5,9 +5,11 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "autograd>=1.8.0",
     "ffmpeg>=1.4",
     "jupyterlab>=4.4.3",
     "matplotlib>=3.9.2",
+    "pymanopt>=2.2.1",
     "pyqt6>=6.8.0",
     "scipy>=1.14.1",
     "torch>=2.5.1",

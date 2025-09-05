@@ -9,17 +9,23 @@ def pwrspec_score(
         rho: TensorType["L"],
         M: int, 
         sigma: float,
+        include_zero=True,
         CLT=False,
         device='cpu',
 ) -> TensorType[..., "L"]:
     assert rho.shape[-1] == x.shape[-1]
+    if x.shape[-1] == 1 and not include_zero:
+        raise ValueError("Must include zero for length 1 signals.")
 
     x_new = x.clone().to(device)
     x_tilde = fft(x_new, norm='ortho')
     rho_true = rho.clone().to(device)
 
     score = torch.zeros_like(x_new)
-    k = 0
+    if include_zero:
+        k = 0
+    else: 
+        k = 1
     while k < x_new.shape[-1]/2 or (k == x_new.shape[-1]//2 and x_new.shape[-1]%2 == 0):
         if CLT:
             tmp = pwrspec_score_comps_CLT(x_new, x_tilde, rho_true, k, M, sigma, device=device)
@@ -95,19 +101,12 @@ def pwrspec_score_comps_CLT(
     fft_mat_k = fft(torch.eye(x_new.shape[-1], device=device)[:, k], norm='ortho')
     q_mat_k = torch.einsum("i, j -> ij", torch.conj(fft_mat_k), fft_mat_k) 
     sym_mat_k = (q_mat_k + torch.conj(q_mat_k).T).real
-
-    # res = M * (rho[k] / (sigma ** 2) - (1. + x_Psqr_k / (sigma ** 2))) * (rho[k] / (sigma ** 2) + x_Psqr_k / (sigma ** 2)) / (2. * (1. + 2. * x_Psqr_k / (sigma ** 2))**2)
     
-    # res = -1. * M * (x_Psqr_k * (sigma**2 + x_Psqr_k) + rho[k] * (sigma**2 - rho[k])) / (sigma**2 * (sigma**2 + 2. * x_Psqr_k)**2)
-    # res /= k_fac
-    # res += -1. / (2 * x_Psqr_k + sigma**2)
-    
-    res = (
+    res = M / (2. * x_Psqr_k + (sigma ** 2)) * (
         (rho[k] * (rho[k] - (sigma ** 2)) - x_Psqr_k * (x_Psqr_k + (sigma ** 2))) 
         / (k_fac * (sigma ** 2) * (2. * x_Psqr_k + (sigma ** 2)))
         - 1. / M
     )
-    res *= M / (2. * x_Psqr_k + (sigma ** 2))
     return res.unsqueeze(-1) * torch.einsum('ij, ...j -> ...i', sym_mat_k, x_new)
 
     

@@ -25,11 +25,13 @@ if __name__ == '__main__':
     # base_signal[0, :length//2] = torch.sin(2. * math.pi * torch.arange(0, length//2)/length)
     # base_signal[0] = 1.
     sampler_scale = 1.
+    center = True
 
     # signal_sampler = signalsamplers.DegenerateLoopSampler(
     #     scale=signal_scale, 
     #     signal=base_signal, 
     #     length=length, 
+    #     center=center,
     #     generator=generator, 
     #     device=device,
     # )
@@ -37,6 +39,7 @@ if __name__ == '__main__':
     #     scale=sampler_scale, 
     #     signal=base_signal, 
     #     length=length, 
+    #     center=center,
     #     generator=generator, 
     #     device=device,
     # )
@@ -44,6 +47,7 @@ if __name__ == '__main__':
         scale=sampler_scale, 
         signal=base_signal, 
         length=length, 
+        center=center,
         generator=generator, 
         device=device,
     )
@@ -92,8 +96,9 @@ if __name__ == '__main__':
         f"lay{hidden_layers}",
         f"hid{hidden_dim}",
         f"emb{embed_dim}",
-        f"sigma{model_sigma}",
+        f"sgm{model_sigma}",
         f"{str(signal_sampler)}{sampler_scale}",
+        f"cnt{center}",
     ))
     
     PATH = "./../../../model_weights/smld/" # NOT LOCATION SAFE
@@ -141,6 +146,7 @@ if __name__ == '__main__':
             device=device
         )
         for inputs in dataloader:
+            optimizer.zero_grad()
             inputs = inputs.to(device)
             loss, specloss = loss_fn(
                 model, 
@@ -150,7 +156,6 @@ if __name__ == '__main__':
             )
             loss_avg += loss
             specloss_avg += specloss
-            optimizer.zero_grad()
             loss.backward()
             optimizer.step()
         scheduler.step()

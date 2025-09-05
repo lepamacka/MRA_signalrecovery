@@ -36,6 +36,7 @@ class SignalSampler:
         scale,
         signal, 
         length, 
+        center,
         generator=None, 
         device='cpu',
     ):
@@ -45,7 +46,10 @@ class SignalSampler:
         self.length = length
         self.generator = generator
         self.device = device
-        self.signal = signal.to(device)
+        if center:
+            self.signal = (signal - signal.mean()).to(device)
+        else:
+            self.signal = signal.to(device)
         self.signal_circulant = circulant(self.signal, 0)
 
     def __call__(
@@ -91,10 +95,11 @@ class GaussianSampler(SignalSampler):
         scale, 
         signal, 
         length, 
+        center=True,
         generator=None, 
         device='cpu',
     ):
-        super().__init__(scale, signal, length, generator, device)
+        super().__init__(scale, signal, length, center, generator, device) 
 
     def __call__(
             self, 
@@ -120,10 +125,11 @@ class DegenerateLoopSampler(SignalSampler):
         scale, 
         signal, 
         length, 
+        center=True,
         generator=None, 
         device='cpu',
     ):
-        super().__init__(scale, signal, length, generator, device)     
+        super().__init__(scale, signal, length, center, generator, device)     
 
     def __call__(
         self, 
@@ -163,10 +169,11 @@ class PlanckSampler(SignalSampler):
         scale, 
         signal, 
         length, 
+        center=True,
         generator=None, 
         device='cpu',
     ):
-        super().__init__(scale, signal, length, generator, device) 
+        super().__init__(scale, signal, length, center, generator, device) 
         self.Y = torch.distributions.chi2.Chi2(df=4)
         self.Z = torch.distributions.uniform.Uniform(0, 1)
     
@@ -212,12 +219,17 @@ class HatSampler(SignalSampler):
         scale, 
         signal, 
         length, 
+        center=True,
         generator=None, 
         device='cpu',
     ):
-        super().__init__(scale, signal, length, generator, device) 
-        self.hats = torch.tril(torch.ones(size=(length, length), device=device))
-    
+        super().__init__(scale, signal, length, center, generator, device) 
+        self.hats = scale * torch.tril(
+            signal.to(device) + torch.ones(size=(length, length), device=device)
+        )
+        if center:
+            self.hats -= self.hats.mean(dim=1, keepdim=True)
+
     def __call__(
         self, 
         num=1,
