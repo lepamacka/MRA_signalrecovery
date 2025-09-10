@@ -46,6 +46,8 @@ class SignalSampler:
         self.length = length
         self.generator = generator
         self.device = device
+        self.center = center
+        self.signal_mean = signal.mean().to(device)
         if center:
             self.signal = (signal - signal.mean()).to(device)
         else:
@@ -251,22 +253,98 @@ class HatSampler(SignalSampler):
     def __str__(self):
         return "hat"
 
+class MultiSampler(SignalSampler):
+    def __init__(
+        self, 
+        scale, 
+        signal, 
+        length, 
+        center=True,
+        generator=None, 
+        device='cpu',
+    ):
+        super().__init__(scale, signal, length, center, generator, device) 
+        self.triang = torch.tril(
+            torch.ones(
+                size=(length, length), 
+                device=device,
+            )
+        )
+
+    def __call__(
+        self, 
+        num=1,
+        do_random_shifts=False,
+    ):
+        shifts = self.generate_shifts(num, do_random_shifts)
+        multi_scales = torch.rand(
+            (num, self.length),
+            device=self.device,
+            generator=self.generator,
+        )
+        multi_idxs = self._batched_randperm(num)
+        rand_ints = torch.randint(
+            low=0, 
+            high=self.length, 
+            size=(num,),
+            generator=self.generator, 
+            device=self.device,
+        )
+        multi_scales *= self.triang[rand_ints, :]
+        samples = torch.sum(
+            multi_scales[:, :, None] * self.signal_circulant[multi_idxs, :],
+            dim=1,
+        )
+        return samples
+
+    def __str__(self):
+        return "mlt"
+
+    def _sum_multisignal(self, scales, idxs, rand_int):
+        return 
+    
+    def _batched_randperm(self, batch_size):
+        out = torch.randperm(
+            batch_size * self.length, 
+            dtype=torch.int64, 
+            device=self.device, 
+            generator=self.generator,
+        )
+        out = out.view(batch_size, self.length)
+        out = out.argsort(dim=1)
+        return out
+        
+
+
 if __name__ == '__main__':
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Current device is \'{device}\'.")
     generator = torch.Generator(device=device) 
     generator.seed()
 
-    length = 41
+    length = 3
     signal = torch.zeros((length,))
-    # signal[0] = 1.
+    signal[0] = 1.
     scale = 1.0
-    num = 1
+    num = 2
+    center = True
     
-    loop_sampler = PlanckSampler(scale, signal, length, generator, device)
-    res = loop_sampler(num, False)
+    sampler = MultiSampler(
+        scale=scale, 
+        signal=signal,
+        length=length,
+        center=center,
+        generator=generator,
+        device=device,
+    )
+    res = sampler(num, False)
+    print(res)
 
-    print(torch.abs(torch.fft.fft(res, norm='ortho')).square().mean(dim=0))
+    # loop_sampler = PlanckSampler(scale, signal, length, generator, device)
+    # res = loop_sampler(num, False)
+
+    # print(torch.abs(torch.fft.fft(res, norm='ortho')).square().mean(dim=0))
+
 
     # plt.plot(res.to('cpu').T)
     # plt.show()
