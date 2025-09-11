@@ -299,9 +299,6 @@ class MultiSampler(SignalSampler):
 
     def __str__(self):
         return "mlt"
-
-    def _sum_multisignal(self, scales, idxs, rand_int):
-        return 
     
     def _batched_randperm(self, batch_size):
         out = torch.randperm(
@@ -314,22 +311,95 @@ class MultiSampler(SignalSampler):
         out = out.argsort(dim=1)
         return out
         
+class BellSampler(SignalSampler):
+    def __init__(
+        self, 
+        scale, 
+        signal, 
+        length, 
+        intensity=None,
+        chi_df=None,
+        center=True,
+        generator=None, 
+        device='cpu',
+    ):
+        super().__init__(scale, signal, length, center, generator, device) 
+        if intensity is not None:
+            self.intensity = intensity
+        else:
+            self.intensity = length/4
+        if chi_df is not None:
+            self.tau = torch.distributions.chi2.Chi2(df=chi_df)
+        else:
+            self.tau = torch.distributions.chi2.Chi2(df=length//4)
+        # self.amp = torch.distributions.exponential.Exponential(scale)
+        self.amp = torch.distributions.uniform.Uniform(0., scale)
+        if length%2 == 1:
+            self.squaredists = (torch.arange(length, device=device)-length//2)**2
+        else:
+            raise NotImplementedError
+        self.triang = torch.tril(
+            torch.ones(size=(length+1, length+1), device=device),
+            diagonal=-1,
+        )
 
+    def __call__(
+        self, 
+        num=1,
+        do_random_shifts=False,
+    ):
+        poissons = torch.poisson(
+            input=self.intensity*torch.ones((num,), device=self.device),
+            generator=self.generator,
+        ).to(device=self.device, dtype=torch.int64)
+        poissons[poissons>=self.length] = self.length * torch.ones_like(poissons[poissons>=self.length])
+        poisson_max = poissons.max().item()
+        rand_ints = torch.randint(
+            low=0, 
+            high=self.length, 
+            size=(num, poisson_max),
+            generator=self.generator, 
+            device=self.device,
+        )
+        # rand_ints = self._batched_randperm(num)
+        taus = self.tau.sample((num, poisson_max)).to(self.device)
+        bells = self._make_bells(rand_ints, taus, num, poisson_max)
+        amps = self.amp.sample((num, poisson_max)).to(self.device)
+        amps = amps * self.triang[poissons, :poisson_max]
+        signals = torch.sum(amps[:, :, None] * bells, dim=1)
+        shifts = self.generate_shifts(num, do_random_shifts)
+        signals_circulants = circulant(signals, dim=-1)
+        samples = signals_circulants[torch.arange(0, num), shifts, :]
+        if self.center:
+            samples -= samples.mean(dim=-1, keepdim=True)
+        return samples
+
+    def __str__(self):
+        return "bell"
+
+    def _make_bells(self, rand_ints, taus, num, poisson_max):
+        tmp = (
+            torch.exp(-self.squaredists[None, None, :]/(2*taus[:, :, None]))
+            / torch.sqrt(np.pi * taus[:, :, None]) 
+        )
+        tmp_circulant = circulant(tmp, dim=-1)
+        return tmp_circulant[torch.arange(num)[:, None], torch.arange(poisson_max)[None, :], rand_ints, :]
 
 if __name__ == '__main__':
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = 'cpu'
     print(f"Current device is \'{device}\'.")
     generator = torch.Generator(device=device) 
     generator.seed()
 
-    length = 3
+    length = 41
     signal = torch.zeros((length,))
-    signal[0] = 1.
-    scale = 1.0
-    num = 2
-    center = True
+    # signal[0] = 1.
+    scale = 5.0
+    num = 5
+    center = False
     
-    sampler = MultiSampler(
+    sampler = BellSampler(
         scale=scale, 
         signal=signal,
         length=length,
@@ -338,7 +408,8 @@ if __name__ == '__main__':
         device=device,
     )
     res = sampler(num, False)
-    print(res)
+    
+    print(torch.std(res, dim=0).square().sum(dim=0).sqrt())
 
     # loop_sampler = PlanckSampler(scale, signal, length, generator, device)
     # res = loop_sampler(num, False)
@@ -346,5 +417,5 @@ if __name__ == '__main__':
     # print(torch.abs(torch.fft.fft(res, norm='ortho')).square().mean(dim=0))
 
 
-    # plt.plot(res.to('cpu').T)
-    # plt.show()
+    plt.plot(res.to('cpu').T)
+    plt.show()

@@ -22,11 +22,11 @@ if __name__ == '__main__':
 
     length = 41
     base_signal = torch.zeros((length,))
-    base_signal += torch.signal.windows.gaussian(length)
-    print(base_signal)
+    # base_signal += torch.signal.windows.gaussian(length)
+    # print(base_signal)
     # base_signal[0, :length//2] = torch.sin(2. * math.pi * torch.arange(0, length//2)/length)
     # base_signal[0] = 1.
-    sampler_scale = 1.
+    sampler_scale = 10.0
     center = True
 
     # signal_sampler = signalsamplers.DegenerateLoopSampler(
@@ -53,7 +53,15 @@ if __name__ == '__main__':
     #     generator=generator, 
     #     device=device,
     # )
-    signal_sampler = signalsamplers.MultiSampler(
+    # signal_sampler = signalsamplers.MultiSampler(
+    #     scale=sampler_scale, 
+    #     signal=base_signal, 
+    #     length=length, 
+    #     center=center,
+    #     generator=generator, 
+    #     device=device,
+    # )
+    signal_sampler = signalsamplers.BellSampler(
         scale=sampler_scale, 
         signal=base_signal, 
         length=length, 
@@ -65,11 +73,11 @@ if __name__ == '__main__':
     hidden_layers = 8
     hidden_dim = 4
     embed_dim = 64
-    model_sigma = 3.0
+    model_sigma = 5.0
 
-    batch_size = 2**9
+    batch_size = 2**6
     batch_num = 2**8
-    n_epochs = 500
+    n_epochs = 1000
     learning_rate = 1e-3
     scheduler_startfactor = 0.1
     digs = int(math.log10(n_epochs))+1
