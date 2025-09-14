@@ -395,9 +395,9 @@ if __name__ == '__main__':
     length = 41
     signal = torch.zeros((length,))
     # signal[0] = 1.
-    scale = 5.0
-    num = 5
-    center = False
+    scale = 3.0
+    num = 512
+    center = True
     
     sampler = BellSampler(
         scale=scale, 
@@ -408,8 +408,19 @@ if __name__ == '__main__':
         device=device,
     )
     res = sampler(num, False)
-    
-    print(torch.std(res, dim=0).square().sum(dim=0).sqrt())
+    print(res.norm(dim=1).mean())
+    res /= res.norm(dim=1, keepdim=True)
+
+    res_pwrspec = torch.abs(torch.fft.fft(res, norm='ortho')).square()
+
+    diffs = res_pwrspec[:, None] - res_pwrspec[None, :]
+    print(diffs.abs().sum(dim=2).mean(dim=1).max())
+
+    diff_min_idx = diffs.abs().sum(dim=2).mean(dim=1).argmax()
+    print(diff_min_idx)
+
+    # torch.save(res[diff_min_idx, :].to('cpu'), "./../../../model_weights/bellsignal_example.pt")
+
 
     # loop_sampler = PlanckSampler(scale, signal, length, generator, device)
     # res = loop_sampler(num, False)
@@ -417,5 +428,6 @@ if __name__ == '__main__':
     # print(torch.abs(torch.fft.fft(res, norm='ortho')).square().mean(dim=0))
 
 
-    plt.plot(res.to('cpu').T)
+    # plt.plot(res.to('cpu').T)
+    plt.plot(res[diff_min_idx, :].to('cpu'))
     plt.show()
