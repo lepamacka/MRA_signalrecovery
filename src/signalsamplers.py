@@ -240,18 +240,18 @@ class HatSampler(SignalSampler):
             for hat_idx in range(self.length):
                 if use_CLT:
                     mean = np.zeros(((self.length+1)//2,))
-                    std = np.zeros(((self.length+1)//2,))
+                    cov = np.zeros(((self.length+1)//2,))
                     for k in range((self.length+1)//2):
                         if k == 0 or (k == self.length // 2 and self.length % 2 == 0):
-                            k_fac = 1
-                        else:
                             k_fac = 2
+                        else:
+                            k_fac = 1
                         mean[k] = hat_pwrspecs[hat_idx, k] + sigma**2
-                        std[k] = (sigma**2)/(k_fac*num_samples) * (2 * hat_pwrspecs[hat_idx, k] + sigma**2)
+                        cov[k] = (2*(sigma**2)/(k_fac*num_samples) * (2 * hat_pwrspecs[hat_idx, k] + sigma**2))
                     masses[hat_idx] += multivariate_normal.pdf(
                         x=sample_pwrspec[:(self.length+1)//2].numpy(force=True), 
                         mean=mean, 
-                        cov=np.diag(std),
+                        cov=np.diag(cov),
                     )
                 elif use_scipy:
                     hat_pwrspecs *= num_samples / (sigma ** 2)

@@ -10,6 +10,7 @@ def experimental_conditioner(
     rho_est,
     M,
     MRA_sigma,
+    num_montecarlo,
     even,
     include_zero,
     use_CLT,
@@ -21,29 +22,42 @@ def experimental_conditioner(
         rho_est=rho_est, 
         M=M, 
         sigma_t=sigma_t, 
+        num_montecarlo=num_montecarlo,
         even=even, 
         device=device,
     )
 
     score = pwrspec_score(
         x=x_t, 
-        rho=rho_t+(MRA_sigma**2), 
+        rho=rho_t[0, ...]+(MRA_sigma**2), 
         M=M, 
         sigma=torch.sqrt(MRA_sigma**2 + sigma_t**2), 
         include_zero=include_zero,
         CLT=use_CLT, 
         device=device
     )
+    if num_montecarlo > 1:
+        for idx in range(num_montecarlo-1):
+            score += pwrspec_score(
+                x=x_t, 
+                rho=rho_t[idx+1, ...]+(MRA_sigma**2), 
+                M=M, 
+                sigma=torch.sqrt(MRA_sigma**2 + sigma_t**2), 
+                include_zero=include_zero,
+                CLT=use_CLT, 
+                device=device
+            )
     return score
 
 def rand_pwrspec_cond(
     rho_est, 
     M, 
     sigma_t, 
+    num_montecarlo,
     even,
     device,
 ):
-    rho_t = torch.zeros_like(rho_est)
+    rho_t = torch.zeros_like(rho_est).unsqueeze(0).repeat(num_montecarlo, 1)
     for k, rho_k in enumerate(rho_est):
         if k == 0 or (k == rho_est.shape[-1] and even):
             k_fac = 2.
@@ -51,6 +65,6 @@ def rand_pwrspec_cond(
             k_fac = 1.
         mu_k = rho_k + sigma_t**2
         sigma_k = torch.sqrt((k_fac * (sigma_t**2) / M) * (2 * rho_k + sigma_t**2))
-        rho_t[k] = mu_k + sigma_k * torch.randn((1,), device=device)
+        rho_t[:, k] = mu_k + sigma_k * torch.randn((num_montecarlo,), device=device)
     rho_t = torch.abs(rho_t)
     return rho_t
